@@ -162,8 +162,14 @@
             <!-- Left: Job Summary & Screen Snapshot -->
             <div class="scorecard-job-summary">
               <div class="job-meta">
-                <span class="badge badge-info" id="job-company-badge">Company</span>
+                <div class="job-meta-badges">
+                  <span class="badge badge-info" id="job-company-badge">Company</span>
+                  <span class="badge-outline" id="job-location-badge" style="display: none;">📍 Location</span>
+                  <span class="badge-outline" id="job-seniority-badge" style="display: none;">💼 Seniority</span>
+                  <span class="badge-outline" id="job-type-badge" style="display: none;">⏱️ Type</span>
+                </div>
                 <h3 id="job-title-display" class="job-title-text">Senior Software Engineer</h3>
+                <div id="job-skills-container" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;"></div>
               </div>
               
               <div class="screenshot-preview-box">

@@ -67,6 +67,10 @@ class AutofillSession:
         self.url = ""
         self.job_title = ""
         self.company = ""
+        self.location = ""
+        self.seniority = ""
+        self.employment_type = ""
+        self.key_skills: List[str] = []
         self.description = ""
         self.initial_screenshot = ""
         self.post_screenshot = ""
@@ -100,6 +104,10 @@ class AutofillSession:
             self.url = ""
             self.job_title = ""
             self.company = ""
+            self.location = ""
+            self.seniority = ""
+            self.employment_type = ""
+            self.key_skills = []
             self.description = ""
             self.initial_screenshot = ""
             self.post_screenshot = ""
@@ -214,6 +222,10 @@ def get_status():
             "url": session.url,
             "job_title": session.job_title,
             "company": session.company,
+            "location": session.location,
+            "seniority": session.seniority,
+            "employment_type": session.employment_type,
+            "key_skills": session.key_skills,
             "description": session.description,
             "initial_screenshot": session.initial_screenshot,
             "post_screenshot": session.post_screenshot,
@@ -413,9 +425,15 @@ def scan_job_url(req: ScanRequest):
 
             session.job_title = job_info.title
             session.company = job_info.company
+            session.location = job_info.location
+            session.seniority = job_info.seniority
+            session.employment_type = job_info.employment_type
+            session.key_skills = job_info.key_skills
             session.description = job_info.description
 
-            dev_logger.log("SUCCESS", f"Extracted Job: '{job_info.title}' at '{job_info.company}'")
+            dev_logger.log("SUCCESS", f"Extracted Job: '{job_info.title}' at '{job_info.company}'" + (f" ({job_info.location})" if job_info.location else ""))
+            if job_info.key_skills:
+                dev_logger.log("INFO", f"Detected Target Tech Stack: {', '.join(job_info.key_skills)}")
 
             if job_info.screenshot_path:
                 session.initial_screenshot = f"/screenshots/{Path(job_info.screenshot_path).name}"
@@ -440,6 +458,10 @@ def scan_job_url(req: ScanRequest):
             "status": "scan_complete",
             "job_title": session.job_title,
             "company": session.company,
+            "location": session.location,
+            "seniority": session.seniority,
+            "employment_type": session.employment_type,
+            "key_skills": session.key_skills,
             "description": session.description,
             "initial_screenshot": session.initial_screenshot,
             "score": session.score_result,

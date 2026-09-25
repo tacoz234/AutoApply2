@@ -17,8 +17,12 @@ from src.config import SCREENSHOTS_DIR
 class ExtractedJobInfo(BaseModel):
     title: str = "Unknown Role"
     company: str = "Unknown Company"
+    location: str = ""
+    seniority: str = ""
+    employment_type: str = ""
     description: str = ""
     requirements_text: str = ""
+    key_skills: List[str] = Field(default_factory=list)
     screenshot_path: Optional[str] = None
 
 
@@ -40,11 +44,88 @@ class FormExtractor:
     def __init__(self, page: Page):
         self.page = page
 
+    def clean_page_for_capture(self) -> None:
+        """Dismisses popups, sign-in banners, cookie prompts, and stabilizes sticky elements."""
+        try:
+            # 1. Click common dismiss / close buttons on overlays
+            dismiss_selectors = [
+                "button.modal__dismiss",
+                "button[aria-label='Dismiss']",
+                "button[data-modal='dismiss']",
+                ".contextual-sign-in-modal__modal-dismiss-btn",
+                "button.artdeco-modal__dismiss",
+                "button:has-text('Dismiss')",
+                "button.cookie-policy-banner__dismiss",
+            ]
+            for sel in dismiss_selectors:
+                loc = self.page.locator(sel)
+                if loc.count() > 0:
+                    try:
+                        loc.first.click(timeout=1000)
+                    except Exception:
+                        pass
+
+            # 2. Expand all description "Show more" toggles
+            expand_selectors = [
+                "button.show-more-less-html__button--more",
+                "button[data-tracking-control-name*='show-more']",
+                "button.jobs-description__footer-button",
+                "button[aria-label*='Expand description']",
+                "button:has-text('Show more')",
+            ]
+            for sel in expand_selectors:
+                loc = self.page.locator(sel)
+                if loc.count() > 0 and loc.first.is_visible():
+                    try:
+                        loc.first.click(timeout=1500)
+                    except Exception:
+                        pass
+
+            # 3. Clean up obstructive DOM elements and neutralize sticky headers during full page captures
+            self.page.evaluate("""() => {
+                // Remove floating modals, sign-in banners, backdrops
+                const removeSelectors = [
+                    '.contextual-sign-in-modal',
+                    '[data-tracking-control-name*="contextual-sign-in-modal"]',
+                    '.modal__overlay',
+                    '.artdeco-modal-overlay',
+                    '#artdeco-modal-outlet',
+                    '.authwall-join-form',
+                    '.cta-modal',
+                    '.signin-prompt',
+                    '.guest-interstitial',
+                    '.toast-container',
+                    '#session_key-login',
+                    '.flavor-modal'
+                ];
+                removeSelectors.forEach(sel => {
+                    document.querySelectorAll(sel).forEach(el => el.remove());
+                });
+
+                // Neutralize fixed & sticky navigation banners during full-page rendering
+                document.querySelectorAll('header, nav, .sub-nav-cta, .nav__button-secondary, .top-card-layout__cta-container, [data-view-name*="floating"]').forEach(el => {
+                    const style = window.getComputedStyle(el);
+                    if (style.position === 'fixed' || style.position === 'sticky') {
+                        el.style.position = 'absolute';
+                        el.style.top = '0px';
+                    }
+                });
+
+                // Scroll to top
+                window.scrollTo(0, 0);
+            }""")
+            time.sleep(0.4)
+        except Exception:
+            pass
+
     def capture_screenshot(self, name_prefix: str = "screen") -> str:
-        """Captures a full-page or viewport screenshot for visual review and vision LLM analysis."""
+        """Captures a clean, unobstructed screenshot for visual review and vision LLM analysis."""
         timestamp = int(time.time())
         filename = f"{name_prefix}_{timestamp}.png"
         filepath = SCREENSHOTS_DIR / filename
+        
+        self.clean_page_for_capture()
+
         try:
             self.page.screenshot(path=str(filepath), full_page=True)
         except Exception:
@@ -52,23 +133,17 @@ class FormExtractor:
         return str(filepath.resolve())
 
     def extract_job_info(self) -> ExtractedJobInfo:
-        """Extracts job title, company, and description text from the page."""
-        # Check if LinkedIn description needs expanding
-        if "linkedin.com" in self.page.url.lower():
-            try:
-                show_more = self.page.locator("button.jobs-description__footer-button, button:has-text('Show more')").first
-                if show_more.count() > 0 and show_more.is_visible():
-                    show_more.click(timeout=1500)
-                    time.sleep(0.4)
-            except Exception:
-                pass
+        """Extracts job title, company, location, criteria, and description text from the page."""
+        self.clean_page_for_capture()
 
-        # 1. Capture visual screenshot
+        # 1. Capture clean visual screenshot
         screenshot_path = self.capture_screenshot("job_posting")
 
         # 2. Extract title using priority heuristics
         title = "Unknown Position"
         title_selectors = [
+            "h1.top-card-layout__title",
+            "h1.topcard__title",
             ".job-details-jobs-unified-top-card__job-title",
             ".jobs-unified-top-card__job-title",
             "h1.t-24",
@@ -101,6 +176,8 @@ class FormExtractor:
         # 3. Extract company name
         company = "Target Company"
         company_selectors = [
+            "a.topcard__org-name-link",
+            ".topcard__flavor--black-link",
             ".job-details-jobs-unified-top-card__company-name a",
             ".job-details-jobs-unified-top-card__company-name",
             ".jobs-unified-top-card__company-name",
@@ -120,8 +197,43 @@ class FormExtractor:
                     company = text
                     break
 
-        # 4. Extract job description body
+        # 4. Extract Location
+        location = ""
+        location_selectors = [
+            "span.topcard__flavor--bullet",
+            ".top-card-layout__first-subline .topcard__flavor:nth-child(2)",
+            ".job-details-jobs-unified-top-card__primary-description-container span",
+            ".posting-categories .location",
+            "[data-qa='job-location']",
+            "[class*='location']",
+        ]
+        for sel in location_selectors:
+            loc = self.page.locator(sel).first
+            if loc.count() > 0:
+                loc_text = loc.inner_text().strip()
+                if loc_text and len(loc_text) < 100:
+                    location = loc_text
+                    break
+
+        # 5. Extract Seniority & Employment Type
+        seniority = ""
+        employment_type = ""
+        try:
+            criteria_items = self.page.locator(".description__job-criteria-item, .job-details-jobs-unified-top-card__job-insight, .jobs-unified-top-card__job-insight")
+            for i in range(criteria_items.count()):
+                item_text = criteria_items.nth(i).inner_text().strip()
+                if "Seniority" in item_text:
+                    seniority = item_text.replace("Seniority level", "").replace("Seniority", "").strip()
+                elif "Employment" in item_text:
+                    employment_type = item_text.replace("Employment type", "").replace("Employment", "").strip()
+        except Exception:
+            pass
+
+        # 6. Extract job description body
         desc_selectors = [
+            ".show-more-less-html__markup",
+            ".description__text",
+            ".decorated-job-posting__details",
             "#job-details",
             ".jobs-description__content",
             ".jobs-box__html-content",
@@ -143,16 +255,39 @@ class FormExtractor:
                     break
 
         if not description or len(description) < 100:
-            # Fallback to general page text
             body_text = self.page.locator("body").inner_text()
-            # Truncate to reasonable context window
             description = body_text[:6000]
+
+        # Clean description artifacts
+        description = description.replace("\ufffd", "'")
+        for cut in ["Similar Searches", "Similar searches", "People also viewed", "Search more jobs"]:
+            if cut in description:
+                description = description.split(cut)[0].strip()
+
+        # 7. Extract Key Tech Skills Detected
+        KNOWN_TECH = [
+            "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "Go", "Golang", "Rust",
+            "React", "Angular", "Vue", "Node", "Node.js", "Spring Boot", "Django", "FastAPI", "Flask",
+            "AWS", "GCP", "Azure", "Docker", "Kubernetes", "CI/CD", "Git", "GitHub", "SQL", "PostgreSQL",
+            "MongoDB", "Redis", "GraphQL", "REST", "gRPC", "Linux", "Terraform", "Kafka",
+            "LangChain", "LLM", "Machine Learning", "Microservices"
+        ]
+        import re
+        key_skills = []
+        for tech in KNOWN_TECH:
+            pattern = rf"\b{re.escape(tech)}\b"
+            if re.search(pattern, description, re.IGNORECASE):
+                key_skills.append(tech)
 
         return ExtractedJobInfo(
             title=title,
             company=company,
+            location=location,
+            seniority=seniority,
+            employment_type=employment_type,
             description=description,
             requirements_text=description,
+            key_skills=key_skills,
             screenshot_path=screenshot_path,
         )
 

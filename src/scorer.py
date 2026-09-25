@@ -200,55 +200,105 @@ Provide your brutal critique and callback probability in strict JSON format.
         job_description: str,
         user_profile: UserProfile,
     ) -> MatchScoreResult:
-        """Reliable heuristic fallback ensuring pipeline never crashes."""
+        """Accurate heuristic gap analysis matching verified tech stack and candidate profile."""
+        import re
+
         jd_lower = job_description.lower()
-        skills = [s.lower() for s in user_profile.skills]
-        matched_skills = [s for s in skills if s in jd_lower]
-        missing_skills = [
-            kw for kw in ["kubernetes", "c++", "rust", "go", "graphql", "terraform"]
-            if kw in jd_lower and kw not in skills
+        title_lower = job_title.lower()
+        candidate_skills = [s.strip() for s in user_profile.skills if s.strip()]
+
+        # 1. Detect technical skills that are ACTUALLY present in this specific job description
+        TECH_CATALOG = [
+            "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "Rust", "Ruby", "PHP", "Swift", "Kotlin",
+            "React", "Angular", "Vue", "Node", "Node.js", "Spring Boot", "Django", "FastAPI", "Flask",
+            "AWS", "GCP", "Azure", "Docker", "Kubernetes", "CI/CD", "Git", "GitHub", "SQL", "PostgreSQL",
+            "MongoDB", "Redis", "GraphQL", "REST", "gRPC", "Linux", "Terraform", "Kafka",
+            "LangChain", "LLM", "Machine Learning", "Microservices"
         ]
 
+        jd_tech_detected = []
+        for tech in TECH_CATALOG:
+            pattern = rf"\b{re.escape(tech.lower())}\b"
+            if re.search(pattern, jd_lower):
+                jd_tech_detected.append(tech)
+
+        # Handle 'Go' / 'Golang' specifically with strict boundary to avoid matching 'undergo', 'ongoing', 'category'
+        if re.search(r"\b(golang|go language)\b", jd_lower):
+            jd_tech_detected.append("Go")
+
+        # 2. Determine matched skills vs missing skills using word boundaries
+        matched_skills = []
+        for cs in candidate_skills:
+            pattern = rf"\b{re.escape(cs.lower())}\b"
+            if re.search(pattern, jd_lower):
+                matched_skills.append(cs)
+
+        missing_skills = [
+            tech for tech in jd_tech_detected
+            if not any(cs.lower() == tech.lower() or tech.lower() in cs.lower() for cs in candidate_skills)
+        ]
+
+        # 3. Detect Dealbreakers
         dealbreakers = []
-        if "clearance" in jd_lower and "secret" in jd_lower:
+        if re.search(r"\b(top\s*secret|ts/sci|active\s*secret\s*clearance|polygraph)\b", jd_lower):
             user_clearance = user_profile.authorization.get("security_clearance", "None")
-            if user_clearance == "None":
-                dealbreakers.append("Requires active Security Clearance; profile indicates None.")
+            if user_clearance in ("None", "", "N/A"):
+                dealbreakers.append("Requires active Security Clearance; candidate profile indicates None.")
 
-        if "sponsorship" in jd_lower and ("not provide" in jd_lower or "no sponsorship" in jd_lower):
-            if user_profile.authorization.get("requires_sponsorship") == "Yes":
-                dealbreakers.append("Job does not sponsor visas; candidate requires sponsorship.")
+        if re.search(r"\b(no\s*sponsorship|unable\s*to\s*sponsor|will\s*not\s*sponsor)\b", jd_lower):
+            if user_profile.authorization.get("requires_sponsorship", "").lower() in ("yes", "true"):
+                dealbreakers.append("Role explicitly states no visa sponsorship; candidate requires sponsorship.")
 
-        chance = 65
+        if re.search(r"\b(u\.?s\.?\s*citizen\s*required|must\s*be\s*a\s*u\.?s\.?\s*citizen)\b", jd_lower):
+            if user_profile.authorization.get("us_work_authorized", "").lower() in ("no", "false"):
+                dealbreakers.append("Role requires U.S. Citizenship; candidate profile indicates unauthorized.")
+
+        # 4. Seniority / Experience calibration
+        is_entry_level = any(k in title_lower or k in jd_lower for k in ["entry level", "junior", "intern", "graduate", "associate", "trainee"])
+        total_exp_years = len(user_profile.work_experience) * 2.0
+
+        # 5. Calculate callback probability
         if dealbreakers:
             chance = 15
-        elif missing_skills:
-            chance = max(25, 65 - (len(missing_skills) * 15))
+        else:
+            base_score = 65 if is_entry_level else 55
+            skill_bonus = min(25, len(matched_skills) * 8)
+            missing_penalty = min(35, len(missing_skills) * 8)
+            chance = max(20, min(95, base_score + skill_bonus - missing_penalty))
 
+        # 6. Formulate honest brutal reality
         brutal_reality = []
         if dealbreakers:
             brutal_reality.extend(dealbreakers)
         if missing_skills:
             brutal_reality.append(
-                f"Job specifically calls for {', '.join(missing_skills[:3]).title()}; candidate profile shows zero verified production track record."
+                f"Target tech stack specifically includes {', '.join(missing_skills[:3])}; profile lacks explicit production highlights for these tools."
+            )
+        if not is_entry_level and total_exp_years < 3:
+            brutal_reality.append(
+                "Role targets mid/senior depth; candidate profile shows junior or early-career timeline."
             )
         if not brutal_reality:
             brutal_reality.append(
-                "High applicant volume role: without a strong internal referral, this application faces a 70%+ chance of ATS queue stagnation."
+                "High applicant volume role: competitive candidate pool requires customized resume keywords to pass ATS recruiter screen."
             )
 
         strengths = [
-            f"Demonstrated background in {s.title()}" for s in matched_skills[:4]
-        ] or ["Core software engineering fundamentals."]
+            f"Demonstrated background in {s}" for s in matched_skills[:4]
+        ]
+        if is_entry_level and not strengths:
+            strengths.append("Matches entry-level / foundational qualification profile.")
+        elif not strengths:
+            strengths.append("Core software engineering and problem solving fundamentals.")
 
-        rec = "PASS" if chance < 30 else ("BORDERLINE" if chance < 60 else "PROCEED")
+        rec = "PASS" if chance < 35 else ("BORDERLINE" if chance < 65 else "PROCEED")
 
         return MatchScoreResult(
             job_title=job_title or "Software Engineer",
             company=company or "Target Company",
             estimated_callback_chance=chance,
             brutal_reality=brutal_reality[:3],
-            strengths=strengths[:3],
+            strengths=strengths[:4],
             dealbreakers=dealbreakers,
             recommendation=rec,
         )

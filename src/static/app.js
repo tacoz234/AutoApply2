@@ -219,6 +219,11 @@ function openScreenshotLightbox(src, title = "Screenshot Inspection") {
   translateX = 0;
   translateY = 0;
   document.getElementById("lightbox-pan-surface").style.transform = "translate(0px, 0px) scale(1)";
+  const viewport = document.getElementById("lightbox-viewport");
+  if (viewport) {
+    viewport.scrollTop = 0;
+    viewport.scrollLeft = 0;
+  }
 
   modal.style.display = "flex";
 }
@@ -655,6 +660,52 @@ function renderScorecard(data) {
 
   document.getElementById("job-company-badge").innerText = data.company || "Company";
   document.getElementById("job-title-display").innerText = data.job_title || "Position";
+
+  // Metadata Badges (Location, Seniority, Employment Type)
+  const locBadge = document.getElementById("job-location-badge");
+  if (locBadge) {
+    if (data.location) {
+      locBadge.innerText = `📍 ${data.location}`;
+      locBadge.style.display = "inline-block";
+    } else {
+      locBadge.style.display = "none";
+    }
+  }
+
+  const senBadge = document.getElementById("job-seniority-badge");
+  if (senBadge) {
+    if (data.seniority) {
+      senBadge.innerText = `💼 ${data.seniority}`;
+      senBadge.style.display = "inline-block";
+    } else {
+      senBadge.style.display = "none";
+    }
+  }
+
+  const typeBadge = document.getElementById("job-type-badge");
+  if (typeBadge) {
+    if (data.employment_type) {
+      typeBadge.innerText = `⏱️ ${data.employment_type}`;
+      typeBadge.style.display = "inline-block";
+    } else {
+      typeBadge.style.display = "none";
+    }
+  }
+
+  // Key Skills Detected pills
+  const skillsContainer = document.getElementById("job-skills-container");
+  if (skillsContainer) {
+    skillsContainer.innerHTML = "";
+    if (data.key_skills && data.key_skills.length > 0) {
+      data.key_skills.forEach((skill) => {
+        const span = document.createElement("span");
+        span.className = "skill-tag-pill";
+        span.innerText = skill;
+        skillsContainer.appendChild(span);
+      });
+    }
+  }
+
   document.getElementById("job-desc-text").innerText = data.description || "No description text extracted.";
 
   const imgEl = document.getElementById("job-screenshot-img");
