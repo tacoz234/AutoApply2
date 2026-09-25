@@ -13,10 +13,12 @@ USER_PROFILE_PATH = DATA_DIR / "user_profile.json"
 QA_BANK_PATH = DATA_DIR / "qa_bank.json"
 APPLICATIONS_DB_PATH = DATA_DIR / "applications.sqlite"
 DEFAULT_RESUME_PATH = DATA_DIR / "sample_resume.pdf"
+BROWSER_PROFILE_DIR = DATA_DIR / "browser_profile"
 
 # Ensure data and screenshot directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+BROWSER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Ollama & LLM configurations
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")

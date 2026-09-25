@@ -28,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initDevLogs();
   initSetupWizard();
   initProfileResumeUpload();
+  initBrowserAuthManager();
 
   // Background poll for log count on startup
   pollDevLogsCount();
@@ -382,6 +383,8 @@ function initApplyFlow() {
       return;
     }
 
+    const authBox = document.getElementById("auth-required-box");
+    if (authBox) authBox.style.display = "none";
     loadingCard.style.display = "flex";
     scorecardContainer.style.display = "none";
     progressContainer.style.display = "none";
@@ -400,6 +403,20 @@ function initApplyFlow() {
       .then((data) => {
         loadingCard.style.display = "none";
         btnScan.disabled = false;
+
+        if (data.status === "auth_required") {
+          if (authBox) {
+            authBox.style.display = "block";
+            const descEl = document.getElementById("auth-req-desc");
+            if (descEl) {
+              descEl.innerText = data.message || `${data.platform || "Platform"} requires authentication to view this posting.`;
+            }
+          }
+          showToast(`Authentication required on ${data.platform || "job portal"}! Click 'Open Browser & Log In'`, "warning");
+          return;
+        }
+
+        if (authBox) authBox.style.display = "none";
         renderScorecard(data);
       })
       .catch((err) => {
@@ -408,6 +425,23 @@ function initApplyFlow() {
         showToast(err.message || "Error scanning page", "error");
       });
   });
+
+  // Auth Required Card Actions
+  const btnAuthReqLogin = document.getElementById("btn-auth-req-login");
+  const btnAuthReqRetry = document.getElementById("btn-auth-req-retry");
+  if (btnAuthReqLogin) {
+    btnAuthReqLogin.addEventListener("click", () => {
+      openBrowserAuthModal();
+      document.getElementById("btn-login-linkedin").click();
+    });
+  }
+  if (btnAuthReqRetry) {
+    btnAuthReqRetry.addEventListener("click", () => {
+      const authBox = document.getElementById("auth-required-box");
+      if (authBox) authBox.style.display = "none";
+      btnScan.click();
+    });
+  }
 
   document.getElementById("btn-proceed-autofill").addEventListener("click", () => {
     scorecardContainer.style.display = "none";
@@ -1337,3 +1371,158 @@ function initProfileResumeUpload() {
       });
   }
 }
+
+// =========================================================================
+// BROWSER LOGIN & PERSISTENT SESSION MANAGER
+// =========================================================================
+
+function openBrowserAuthModal() {
+  const modal = document.getElementById("modal-browser-login");
+  if (modal) {
+    modal.classList.remove("hidden");
+    modal.style.display = "flex";
+  }
+  checkBrowserAuthStatus();
+}
+
+function closeBrowserAuthModal() {
+  const modal = document.getElementById("modal-browser-login");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.style.display = "none";
+  }
+}
+
+function checkBrowserAuthStatus() {
+  fetch("/api/browser/status")
+    .then((r) => r.json())
+    .then((data) => {
+      const activeBox = document.getElementById("active-browser-controls");
+      if (activeBox) {
+        activeBox.style.display = data.is_active ? "flex" : "none";
+      }
+    })
+    .catch(() => {});
+}
+
+function initBrowserAuthManager() {
+  const btnOpenAuth = document.getElementById("btn-open-browser-auth");
+  const btnQuickLogin = document.getElementById("btn-quick-login");
+  const btnCloseModal = document.getElementById("btn-close-browser-modal");
+  const modal = document.getElementById("modal-browser-login");
+
+  if (btnOpenAuth) {
+    btnOpenAuth.addEventListener("click", openBrowserAuthModal);
+  }
+  if (btnQuickLogin) {
+    btnQuickLogin.addEventListener("click", openBrowserAuthModal);
+  }
+  if (btnCloseModal) {
+    btnCloseModal.addEventListener("click", closeBrowserAuthModal);
+  }
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeBrowserAuthModal();
+    });
+  }
+
+  // LinkedIn Login Trigger
+  const btnLoginLinkedin = document.getElementById("btn-login-linkedin");
+  if (btnLoginLinkedin) {
+    btnLoginLinkedin.addEventListener("click", () => {
+      showToast("Launching Chromium for LinkedIn login...", "info");
+      fetch("/api/browser/open-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: "https://www.linkedin.com/login",
+          platform: "LinkedIn",
+        }),
+      })
+        .then((r) => r.json())
+        .then(() => {
+          const activeBox = document.getElementById("active-browser-controls");
+          if (activeBox) activeBox.style.display = "flex";
+          showToast("Chromium opened! Log into LinkedIn on screen, then click 'Done / Save Session'", "success");
+        })
+        .catch((err) => {
+          showToast("Failed launching browser: " + err.message, "error");
+        });
+    });
+  }
+
+  // Indeed Login Trigger
+  const btnLoginIndeed = document.getElementById("btn-login-indeed");
+  if (btnLoginIndeed) {
+    btnLoginIndeed.addEventListener("click", () => {
+      showToast("Launching Chromium for Indeed login...", "info");
+      fetch("/api/browser/open-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: "https://secure.indeed.com/account/login",
+          platform: "Indeed",
+        }),
+      })
+        .then((r) => r.json())
+        .then(() => {
+          const activeBox = document.getElementById("active-browser-controls");
+          if (activeBox) activeBox.style.display = "flex";
+          showToast("Chromium opened! Log into Indeed, then click 'Done / Save Session'", "success");
+        })
+        .catch((err) => {
+          showToast("Failed launching browser: " + err.message, "error");
+        });
+    });
+  }
+
+  // Custom Site Login Trigger
+  const btnLoginCustom = document.getElementById("btn-login-custom");
+  const customUrlInput = document.getElementById("custom-auth-url");
+  if (btnLoginCustom && customUrlInput) {
+    btnLoginCustom.addEventListener("click", () => {
+      const targetUrl = customUrlInput.value.trim();
+      if (!targetUrl) {
+        showToast("Please enter a custom URL to open", "warning");
+        return;
+      }
+      showToast(`Launching Chromium for ${targetUrl}...`, "info");
+      fetch("/api/browser/open-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: targetUrl,
+          platform: "Custom Site",
+        }),
+      })
+        .then((r) => r.json())
+        .then(() => {
+          const activeBox = document.getElementById("active-browser-controls");
+          if (activeBox) activeBox.style.display = "flex";
+          showToast("Chromium opened! Log in and click 'Done / Save Session'", "success");
+        })
+        .catch((err) => {
+          showToast("Failed launching browser: " + err.message, "error");
+        });
+    });
+  }
+
+  // Done / Close Session Button
+  const btnFinishLogin = document.getElementById("btn-finish-login");
+  if (btnFinishLogin) {
+    btnFinishLogin.addEventListener("click", () => {
+      fetch("/api/browser/close-login", { method: "POST" })
+        .then((r) => r.json())
+        .then(() => {
+          const activeBox = document.getElementById("active-browser-controls");
+          if (activeBox) activeBox.style.display = "none";
+          closeBrowserAuthModal();
+          showToast("Session saved! Your login cookies are now remembered for all applications.", "success");
+        })
+        .catch((err) => {
+          showToast("Error closing session: " + err.message, "error");
+        });
+    });
+  }
+}
+

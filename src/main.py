@@ -31,7 +31,12 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+from src.browser import (
+    create_persistent_context,
+    detect_authwall_or_login,
+)
 from src.config import (
+    BROWSER_PROFILE_DIR,
     BROWSER_TIMEOUT_MS,
     HEADLESS,
     SLOW_MO_MS,
@@ -70,22 +75,28 @@ def run_apply_pipeline(url: str):
     console.print("[dim]Launching browser and capturing page screen...[/dim]")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
+        context = create_persistent_context(
+            p,
             headless=HEADLESS,
             slow_mo=SLOW_MO_MS,
         )
-        context = browser.new_context(
-            viewport=VIEWPORT,
-            user_agent=USER_AGENT,
-        )
-        page = context.new_page()
+        page = context.pages[0] if context.pages else context.new_page()
         page.set_default_timeout(BROWSER_TIMEOUT_MS)
 
         try:
             # Step 1: Ingestion & Screen Reading
             console.print("[cyan]>> Navigating to job posting...[/cyan]")
             page.goto(url, wait_until="domcontentloaded")
-            time.sleep(2)
+            time.sleep(2.5)
+
+            # Check if redirected to login / authwall (e.g. LinkedIn)
+            auth_check = detect_authwall_or_login(page)
+            if auth_check["auth_required"]:
+                console.print(f"\n[bold yellow]🔐 Authentication Required ({auth_check['platform']}):[/bold yellow]")
+                console.print(f"[cyan]Please complete login in the open browser window to view this job posting.[/cyan]")
+                Prompt.ask("Press Enter once you have finished logging in")
+                page.goto(url, wait_until="domcontentloaded")
+                time.sleep(2)
 
             extractor = FormExtractor(page)
             job_info = extractor.extract_job_info()
@@ -148,7 +159,7 @@ def run_apply_pipeline(url: str):
                     status="ABORTED_BY_USER",
                     screenshot_path=job_info.screenshot_path,
                 )
-                browser.close()
+                context.close()
                 return
 
             # Step 3: Ensure Application Form is Open & Scan Fields
@@ -157,10 +168,7 @@ def run_apply_pipeline(url: str):
             if not form_ready:
                 console.print("[yellow]Note: No distinct application form detected. Inspecting current page inputs...[/yellow]")
 
-            fields = extractor.scan_form_fields()
-            console.print(f"[bold green][+] Discovered {len(fields)} interactable field(s) on form[/bold green]")
-
-            # Step 4: Populate Fields Sequentially
+            # Step 4: Populate Fields Sequentially (Supports Multi-Step Forms & Easy Apply)
             console.print("\n[bold blue]>> Executing Autofill Pipeline...[/bold blue]")
             filler = FormFiller(
                 page=page,
@@ -172,7 +180,7 @@ def run_apply_pipeline(url: str):
                 job_description=job_info.description,
             )
 
-            fill_summary = filler.fill_all_fields(fields)
+            fill_summary = filler.fill_multi_step_form(extractor)
 
             # Step 5: Pre-Flight Review & Visual Capture
             post_screenshot = extractor.capture_screenshot("post_fill")
@@ -254,7 +262,39 @@ def run_apply_pipeline(url: str):
             console.print(f"\n[bold red]Pipeline Error:[/bold red] {e}")
             raise e
         finally:
-            browser.close()
+            context.close()
+
+
+@app.command()
+def login(
+    platform: str = typer.Argument("linkedin", help="Platform to log into (e.g. linkedin, indeed, custom)"),
+    url: Optional[str] = typer.Option(None, help="Custom login URL"),
+):
+    """Opens a persistent browser session so you can log into LinkedIn, Indeed, etc."""
+    target_url = url
+    if not target_url:
+        p_lower = platform.lower()
+        if "link" in p_lower:
+            target_url = "https://www.linkedin.com/login"
+        elif "indeed" in p_lower:
+            target_url = "https://secure.indeed.com/account/login"
+        else:
+            target_url = "https://www.linkedin.com/login"
+
+    console.print(f"\n[bold cyan]>> Launching persistent browser for {platform}...[/bold cyan]")
+    console.print(f"[dim]URL: {target_url}[/dim]")
+    console.print(f"[dim]Session profile saved to: {BROWSER_PROFILE_DIR}[/dim]\n")
+
+    with sync_playwright() as p:
+        context = create_persistent_context(p, headless=False, slow_mo=0)
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(target_url)
+
+        console.print("[bold green][+] Browser window is open on your screen.[/bold green]")
+        console.print("[yellow]Please sign into your account, complete 2FA if prompted, and verify you are on your feed/dashboard.[/yellow]")
+        Prompt.ask("\nPress [bold white]Enter[/bold white] here once you are logged in to save your session")
+        context.close()
+        console.print("[bold green][✓] Session saved! Your credentials and cookies are now remembered for all applications.[/bold green]\n")
 
 
 @app.command()

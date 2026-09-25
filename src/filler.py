@@ -92,6 +92,45 @@ class FormFiller:
 
         return summary
 
+    def fill_multi_step_form(self, extractor: Any, max_steps: int = 6) -> FillSummary:
+        """Fills form fields across multi-step wizard pages (e.g. LinkedIn Easy Apply)."""
+        total_summary = FillSummary()
+        seen_field_ids = set()
+
+        for step in range(max_steps):
+            fields = extractor.scan_form_fields()
+            new_fields = [f for f in fields if f.id not in seen_field_ids]
+
+            if new_fields:
+                for f in new_fields:
+                    seen_field_ids.add(f.id)
+                step_summary = self.fill_all_fields(new_fields)
+                total_summary.fields_filled += step_summary.fields_filled
+                total_summary.fields_skipped += step_summary.fields_skipped
+                total_summary.questions_added_to_qa += step_summary.questions_added_to_qa
+                total_summary.details.extend(step_summary.details)
+
+            # Look for Next or Review buttons in multi-step wizard
+            next_btn = self.page.locator(
+                "button[aria-label*='Continue to next step'], button:has-text('Next'), footer button:has-text('Next'), button[aria-label*='Review your application'], button:has-text('Review')"
+            ).first
+
+            # Strict Safety: Never click submit button automatically
+            if next_btn.count() > 0 and next_btn.is_visible():
+                btn_text = next_btn.inner_text().strip().lower()
+                if "submit" in btn_text:
+                    break
+                try:
+                    next_btn.click()
+                    self.page.wait_for_load_state("domcontentloaded", timeout=4000)
+                    time.sleep(1.2)
+                except Exception:
+                    break
+            else:
+                break
+
+        return total_summary
+
     def _process_and_fill_field(
         self, field: ExtractedField, summary: FillSummary
     ) -> Tuple[bool, str]:
@@ -212,6 +251,16 @@ class FormFiller:
             # Dropdown Select
             if field.field_type == "select":
                 return self._select_option(loc, value, field.options)
+
+            # Combobox / Autocomplete (e.g. LinkedIn custom dropdowns)
+            elif field.field_type == "combobox":
+                loc.scroll_into_view_if_needed()
+                loc.click()
+                time.sleep(0.2)
+                loc.fill(value)
+                time.sleep(0.3)
+                self.page.keyboard.press("Enter")
+                return True
 
             # Radio Group
             elif field.field_type == "radio":

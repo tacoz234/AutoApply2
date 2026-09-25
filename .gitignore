@@ -34,5 +34,6 @@ playwright-report/
 
 # Runtime application data & captures
 data/applications.sqlite
+data/browser_profile/
 data/screenshots/*
 !data/screenshots/.gitkeep

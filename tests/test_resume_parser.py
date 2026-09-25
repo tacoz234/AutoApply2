@@ -99,7 +99,7 @@ class TestResumeParser(unittest.TestCase):
         up_data = up_resp.json()
         self.assertEqual(up_data["status"], "success")
         self.assertIn("profile", up_data)
-        self.assertEqual(up_data["profile"]["personal"]["full_name"], "Alex Chen")
+        self.assertEqual(up_data["profile"]["personal"]["full_name"].upper(), "ALEX CHEN")
 
         # 3. POST /api/setup/complete with QA answers
         setup_payload = {

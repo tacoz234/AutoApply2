@@ -53,12 +53,26 @@ class FormExtractor:
 
     def extract_job_info(self) -> ExtractedJobInfo:
         """Extracts job title, company, and description text from the page."""
+        # Check if LinkedIn description needs expanding
+        if "linkedin.com" in self.page.url.lower():
+            try:
+                show_more = self.page.locator("button.jobs-description__footer-button, button:has-text('Show more')").first
+                if show_more.count() > 0 and show_more.is_visible():
+                    show_more.click(timeout=1500)
+                    time.sleep(0.4)
+            except Exception:
+                pass
+
         # 1. Capture visual screenshot
         screenshot_path = self.capture_screenshot("job_posting")
 
         # 2. Extract title using priority heuristics
         title = "Unknown Position"
         title_selectors = [
+            ".job-details-jobs-unified-top-card__job-title",
+            ".jobs-unified-top-card__job-title",
+            "h1.t-24",
+            ".jobs-details__main-content h1",
             "h1",
             "[data-qa='job-title']",
             ".posting-headline h2",
@@ -70,7 +84,7 @@ class FormExtractor:
             loc = self.page.locator(sel).first
             if loc.count() > 0 and loc.is_visible():
                 text = loc.inner_text().strip()
-                if text and len(text) < 120:
+                if text and len(text) < 140:
                     title = text
                     break
 
@@ -87,6 +101,11 @@ class FormExtractor:
         # 3. Extract company name
         company = "Target Company"
         company_selectors = [
+            ".job-details-jobs-unified-top-card__company-name a",
+            ".job-details-jobs-unified-top-card__company-name",
+            ".jobs-unified-top-card__company-name",
+            "a.ember-view[href*='/company/']",
+            "a[href*='linkedin.com/company/']",
             "[data-qa='company-name']",
             ".posting-categories .org",
             ".company-name",
@@ -103,11 +122,15 @@ class FormExtractor:
 
         # 4. Extract job description body
         desc_selectors = [
+            "#job-details",
+            ".jobs-description__content",
+            ".jobs-box__html-content",
+            ".jobs-description",
+            "article.jobs-description__container",
             "#content",
             ".posting-description",
             ".job-description",
             "[data-qa='job-description']",
-            "#job-details",
             "article",
             "main",
         ]
@@ -134,7 +157,7 @@ class FormExtractor:
         )
 
     def ensure_application_form_open(self) -> bool:
-        """Detects if form is visible, or clicks 'Apply' / 'Apply Now' if needed."""
+        """Detects if form is visible, or clicks 'Apply' / 'Apply Now' / 'Easy Apply' if needed."""
         self.page.wait_for_load_state("domcontentloaded")
         time.sleep(1)
 
@@ -144,6 +167,10 @@ class FormExtractor:
 
         # Search for Apply buttons/links
         apply_buttons = [
+            "button.jobs-apply-button",
+            "button:has-text('Easy Apply')",
+            "button[aria-label*='Easy Apply']",
+            ".jobs-s-apply button",
             "a:has-text('Apply for this job')",
             "a:has-text('Apply Now')",
             "button:has-text('Apply Now')",
@@ -158,8 +185,8 @@ class FormExtractor:
             if btn.count() > 0 and btn.is_visible():
                 try:
                     btn.click()
-                    self.page.wait_for_load_state("networkidle", timeout=5000)
-                    time.sleep(1)
+                    self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    time.sleep(1.5)
                     if self._is_form_visible():
                         return True
                 except Exception:
@@ -168,7 +195,9 @@ class FormExtractor:
         return self._is_form_visible()
 
     def _is_form_visible(self) -> bool:
-        """Checks if input elements are present on screen."""
+        """Checks if input elements or modal dialogs are present on screen."""
+        if self.page.locator(".jobs-easy-apply-modal, div[role='dialog']").count() > 0:
+            return True
         input_count = self.page.locator("input:not([type='hidden']), textarea, select").count()
         return input_count >= 2
 
@@ -177,9 +206,13 @@ class FormExtractor:
         fields: List[ExtractedField] = []
         seen_identifiers = set()
 
-        # Common ATS Form Containers
-        form_container = self.page.locator("form, #application_form, #application-form, [data-qa='application-form']").first
-        root = form_container if form_container.count() > 0 else self.page
+        # Priority container: LinkedIn Easy Apply modal / dialog, or standard ATS form
+        modal_container = self.page.locator(".jobs-easy-apply-modal, div[role='dialog']").first
+        if modal_container.count() > 0 and modal_container.is_visible():
+            root = modal_container
+        else:
+            form_container = self.page.locator("form, #application_form, #application-form, [data-qa='application-form']").first
+            root = form_container if form_container.count() > 0 else self.page
 
         # 1. Process File Inputs (Resume / CV Upload)
         file_locators = root.locator("input[type='file']")

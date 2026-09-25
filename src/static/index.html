@@ -54,6 +54,11 @@
       </div>
 
       <div class="sidebar-footer">
+        <button id="btn-open-browser-auth" class="btn btn-dev-logs" title="Sign into LinkedIn, Indeed, or manage persistent browser sessions">
+          <span class="dev-logs-icon">🔐</span>
+          <span class="dev-logs-label">Browser Sessions</span>
+          <span id="auth-status-pill" class="dev-logs-badge" style="background: #0a66c2; color: #fff;">AUTH</span>
+        </button>
         <button id="btn-reopen-setup" class="btn btn-dev-logs" title="Open first-time setup & resume onboarding wizard">
           <span class="dev-logs-icon">🚀</span>
           <span class="dev-logs-label">Setup Wizard</span>
@@ -84,16 +89,38 @@
         <div class="card url-card brutal-card-accent">
           <div class="tape-strip tape-top-center"></div>
           <div class="url-label-row">
-            <span class="hand-annotation">✎ Paste job posting link below (Greenhouse, Lever, Ashby, or Mock ATS):</span>
+            <span class="hand-annotation">✎ Paste job posting link below (LinkedIn, Greenhouse, Lever, Ashby, or Mock ATS):</span>
             <span class="badge badge-black">STEP 1: SCREEN INGESTION</span>
           </div>
           <div class="url-input-group">
-            <input type="url" id="target-url-input" class="form-control" placeholder="https://boards.greenhouse.io/... or http://127.0.0.1:8088/" />
+            <input type="url" id="target-url-input" class="form-control" placeholder="https://www.linkedin.com/jobs/view/... or https://boards.greenhouse.io/..." />
             <button id="btn-scan" class="btn btn-primary">
               <span id="scan-btn-text">⚡ Scan & Evaluate Match</span>
             </button>
+            <button id="btn-quick-login" class="btn btn-secondary" title="Open browser to sign in to LinkedIn / Indeed">
+              🔐 Login
+            </button>
             <button id="btn-quick-mock" class="btn btn-secondary" title="Paste local mock ATS URL">
               🧪 Use Mock ATS
+            </button>
+          </div>
+        </div>
+
+        <!-- Auth Required Alert Card -->
+        <div id="auth-required-box" class="card auth-required-card" style="display: none;">
+          <div class="auth-req-header">
+            <span class="auth-req-icon">🔐</span>
+            <div>
+              <h3 class="auth-req-title">Sign-In Required to View Job</h3>
+              <p id="auth-req-desc" class="auth-req-desc">LinkedIn requires candidate authentication before showing full job descriptions and Easy Apply forms.</p>
+            </div>
+          </div>
+          <div class="auth-req-actions">
+            <button id="btn-auth-req-login" class="btn btn-primary">
+              🚀 Open Browser & Log In
+            </button>
+            <button id="btn-auth-req-retry" class="btn btn-secondary">
+              🔄 I'm Logged In — Retry Scan
             </button>
           </div>
         </div>
@@ -885,6 +912,77 @@
         <button id="btn-complete-setup" class="btn btn-primary btn-lg" type="button">
           Save Everything & Launch ApplyFlow 🚀
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BROWSER LOGIN & SESSIONS MODAL -->
+  <div id="modal-browser-login" class="modal-overlay hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <span class="modal-badge badge-blue">PERSISTENT SESSION</span>
+          <h3 class="modal-title">🔐 Browser Login & Auth Manager</h3>
+        </div>
+        <button id="btn-close-browser-modal" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-lead">
+          Sign into your job portal accounts once. Your session cookies, tokens, and storage are permanently preserved in your local persistent profile directory (<code>data/browser_profile/</code>) so ApplyFlow can automatically load postings and Easy Apply forms without being blocked by login walls.
+        </p>
+        
+        <div class="auth-platforms-grid">
+          <!-- LinkedIn Card -->
+          <div class="auth-platform-card">
+            <div class="auth-platform-header">
+              <div class="auth-platform-icon linkedin-bg">in</div>
+              <div>
+                <h4 class="auth-platform-title">LinkedIn</h4>
+                <span class="auth-platform-sub">Jobs & Easy Apply</span>
+              </div>
+            </div>
+            <p class="auth-platform-desc">Log into your LinkedIn account to access full job descriptions, recruiter details, and Easy Apply applications.</p>
+            <button id="btn-login-linkedin" class="btn btn-primary btn-block">🚀 Open LinkedIn Login</button>
+          </div>
+
+          <!-- Indeed Card -->
+          <div class="auth-platform-card">
+            <div class="auth-platform-header">
+              <div class="auth-platform-icon indeed-bg">indeed</div>
+              <div>
+                <h4 class="auth-platform-title">Indeed</h4>
+                <span class="auth-platform-sub">Job Seeker Account</span>
+              </div>
+            </div>
+            <p class="auth-platform-desc">Log into Indeed to access authenticated postings and 1-click apply questionnaires.</p>
+            <button id="btn-login-indeed" class="btn btn-secondary btn-block">Open Indeed Login</button>
+          </div>
+
+          <!-- Custom URL Card -->
+          <div class="auth-platform-card">
+            <div class="auth-platform-header">
+              <div class="auth-platform-icon custom-bg">🌐</div>
+              <div>
+                <h4 class="auth-platform-title">Custom Site</h4>
+                <span class="auth-platform-sub">Any Portal / ATS</span>
+              </div>
+            </div>
+            <p class="auth-platform-desc">Open any portal URL in the persistent browser to complete login, CAPTCHA, or 2FA.</p>
+            <div class="custom-url-row">
+              <input type="url" id="custom-auth-url" class="form-control" placeholder="https://..." />
+              <button id="btn-login-custom" class="btn btn-secondary">Open</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Session Controller Bar -->
+        <div id="active-browser-controls" class="active-browser-box" style="display: none;">
+          <div class="active-browser-status">
+            <span class="status-indicator active animate-pulse"></span>
+            <span><strong>Browser Window Active:</strong> Complete sign-in & any verification in the open window, then click Done below.</span>
+          </div>
+          <button id="btn-finish-login" class="btn btn-success">✅ Done / Save Session</button>
+        </div>
       </div>
     </div>
   </div>

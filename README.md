@@ -99,7 +99,31 @@ This starts the local dashboard at `http://127.0.0.1:5000/` and opens your defau
 * **👤 Master Profile Tab**: View and edit your personal details, contact info, skills, links, work authorization, and target resume PDF.
 * **💡 QA Bank Tab**: Search, view, add, or delete learned question patterns and answers.
 * **📊 Application History Tab**: Audit log of previous runs, match scores, and status.
+* **🔐 Browser Sessions & LinkedIn Login**: Log into LinkedIn, Indeed, or custom job boards once. All session cookies and 2FA tokens persist in `data/browser_profile/`, allowing ApplyFlow to bypass authwalls and automate LinkedIn Easy Apply flows.
 * **🧪 1-Click Mock ATS Controller**: Start or stop the local test server with a single click.
+
+---
+
+## LinkedIn & External Portal Authentication
+
+Many job boards (especially **LinkedIn**) require authentication before revealing full job descriptions or allowing Easy Apply submissions. ApplyFlow uses anti-detection persistent browser contexts:
+
+### 1. In the Web Dashboard:
+- Click **"🔐 Browser Sessions"** in the sidebar (or the **"🔐 Login"** button beside the URL input).
+- Click **"🚀 Open LinkedIn Login"**. A visible browser window will open on your screen.
+- Log in, complete any 2FA/SMS verification, and make sure your feed loads.
+- Click **"✅ Done / Save Session"**.
+- Your login state is saved permanently in `data/browser_profile/`. From then on, any LinkedIn job link you paste will load in your authenticated session!
+- If you scan a link that requires login before you've authenticated, ApplyFlow automatically detects the authwall and displays a sign-in prompt with 1-click retry.
+
+### 2. In the CLI:
+To sign into your accounts from the terminal:
+```bash
+python -m src.main login linkedin
+# Or for Indeed:
+python -m src.main login indeed
+```
+Log into your account in the browser that opens, press Enter in the terminal, and your session will be remembered across all applications!
 
 ---
 
@@ -107,11 +131,12 @@ This starts the local dashboard at `http://127.0.0.1:5000/` and opens your defau
 
 If you prefer using the terminal instead:
 ```bash
-python -m src.main apply <URL>
-python -m src.main profile
-python -m src.main qa
-python -m src.main history
-python -m src.main test-server
+python -m src.main login linkedin     # Save persistent login session
+python -m src.main apply <URL>        # Run screen ingestion & autofill
+python -m src.main profile            # View canonical candidate profile
+python -m src.main qa                 # View and search QA Knowledge Bank
+python -m src.main history            # View audit log of application runs
+python -m src.main test-server        # Start local mock ATS test server
 ```
 
 ---

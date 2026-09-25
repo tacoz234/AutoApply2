@@ -17,6 +17,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from playwright.sync_api import sync_playwright
 
+from src.browser import (
+    create_persistent_context,
+    detect_authwall_or_login,
+    interactive_browser,
+)
 from src.resume_parser import ResumeParser
 
 from src.config import (
@@ -151,6 +156,12 @@ mock_server_thread: Optional[threading.Thread] = None
 
 class ScanRequest(BaseModel):
     url: str
+    force_visible: bool = False
+
+
+class BrowserLoginRequest(BaseModel):
+    url: Optional[str] = "https://www.linkedin.com/login"
+    platform: Optional[str] = "LinkedIn"
 
 
 class AutofillStartRequest(BaseModel):
@@ -193,9 +204,46 @@ def get_status():
         }
 
 
+@app.post("/api/browser/open-login")
+def open_browser_login(req: BrowserLoginRequest):
+    """Launches an interactive Chromium window with persistent profile for user authentication."""
+    try:
+        url = req.url or "https://www.linkedin.com/login"
+        platform = req.platform or "LinkedIn"
+        dev_logger.log("INFO", f"Launching interactive browser for {platform} authentication ({url})...")
+        interactive_browser.open_login_window(url=url, platform=platform)
+        return {"status": "opened", "url": url, "platform": platform}
+    except Exception as e:
+        dev_logger.log("ERROR", f"Failed to launch browser login window: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/browser/close-login")
+def close_browser_login():
+    """Closes interactive login window and persists all session cookies."""
+    try:
+        interactive_browser.close()
+        dev_logger.log("SUCCESS", "Interactive login browser closed. Session cookies saved to disk.")
+        return {"status": "closed"}
+    except Exception as e:
+        dev_logger.log("ERROR", f"Failed closing browser: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/browser/status")
+def get_browser_status():
+    """Returns status of interactive login browser."""
+    return interactive_browser.get_status()
+
+
 @app.post("/api/scan")
 def scan_job_url(req: ScanRequest):
     """Navigates to URL, captures screenshot, and generates Brutal Match Score."""
+    if interactive_browser.is_active:
+        dev_logger.log("INFO", "Closing active login window before initiating scan...")
+        interactive_browser.close()
+        time.sleep(1)
+
     session.reset()
     session.url = req.url.strip()
     session.status = "scanning"
@@ -204,15 +252,32 @@ def scan_job_url(req: ScanRequest):
     profile = storage.load_profile()
 
     try:
-        dev_logger.log("INFO", "Launching headless Chromium for initial ingestion...")
+        headless_mode = not req.force_visible
+        dev_logger.log("INFO", f"Launching persistent Chromium context ({'headless' if headless_mode else 'visible'})...")
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport=VIEWPORT, user_agent=USER_AGENT)
+            context = create_persistent_context(p, headless=headless_mode, slow_mo=0)
+            page = context.pages[0] if context.pages else context.new_page()
             page.set_default_timeout(BROWSER_TIMEOUT_MS)
             
             dev_logger.log("INFO", f"Navigating to {session.url}...")
             page.goto(session.url, wait_until="domcontentloaded")
-            time.sleep(2)
+            time.sleep(2.5)
+
+            # Check for authwall / sign-in requirement
+            auth_check = detect_authwall_or_login(page)
+            if auth_check["auth_required"]:
+                dev_logger.log("WARN", f"Authentication required on {auth_check['platform']} to view {session.url}.")
+                context.close()
+                with session.lock:
+                    session.status = "auth_required"
+                    session.error_message = f"Sign-in required on {auth_check['platform']} to view this posting."
+                return {
+                    "status": "auth_required",
+                    "platform": auth_check["platform"],
+                    "url": session.url,
+                    "reason": auth_check["reason"],
+                    "message": f"Sign-in required on {auth_check['platform']}. Please log into your account using the Browser Sessions window, then click Retry Scan.",
+                }
 
             dev_logger.log("INFO", "Inspecting page layout and extracting job metadata...")
             extractor = FormExtractor(page)
@@ -241,7 +306,7 @@ def scan_job_url(req: ScanRequest):
             session.score_result = score.model_dump()
             session.status = "scan_complete"
             dev_logger.log("SUCCESS", f"Match Score Calculated: {score.estimated_callback_chance}% Callback Chance ({score.recommendation})")
-            browser.close()
+            context.close()
 
         return {
             "status": "scan_complete",
@@ -259,17 +324,22 @@ def scan_job_url(req: ScanRequest):
 
 
 def _run_autofill_worker():
-    """Background worker executing Playwright in non-headless mode."""
+    """Background worker executing Playwright in non-headless mode with persistent candidate profile."""
+    if interactive_browser.is_active:
+        dev_logger.log("INFO", "Closing active login window before initiating autofill...")
+        interactive_browser.close()
+        time.sleep(1)
+
     profile = storage.load_profile()
-    dev_logger.log("INFO", "Initializing non-headless Chromium window on user desktop...")
+    dev_logger.log("INFO", "Initializing non-headless Chromium window with persistent candidate profile...")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
+        context = create_persistent_context(
+            p,
             headless=HEADLESS,
             slow_mo=SLOW_MO_MS,
         )
-        context = browser.new_context(viewport=VIEWPORT, user_agent=USER_AGENT)
-        page = context.new_page()
+        page = context.pages[0] if context.pages else context.new_page()
         page.set_default_timeout(BROWSER_TIMEOUT_MS)
 
         try:
@@ -277,11 +347,22 @@ def _run_autofill_worker():
             page.goto(session.url, wait_until="domcontentloaded")
             time.sleep(2)
 
+            # Check if redirected to login / authwall
+            auth_check = detect_authwall_or_login(page)
+            if auth_check["auth_required"]:
+                dev_logger.log("WARN", f"Sign-in required on {auth_check['platform']}! Please log in to your account in the open browser window...")
+                for _ in range(60):
+                    time.sleep(2)
+                    if not detect_authwall_or_login(page)["auth_required"]:
+                        dev_logger.log("SUCCESS", f"Successfully authenticated on {auth_check['platform']}! Resuming autofill...")
+                        time.sleep(1)
+                        break
+
             extractor = FormExtractor(page)
-            dev_logger.log("INFO", "Detecting and opening application form...")
+            dev_logger.log("INFO", "Detecting and opening application form / Easy Apply...")
             extractor.ensure_application_form_open()
             fields = extractor.scan_form_fields()
-            dev_logger.log("SUCCESS", f"Identified {len(fields)} interactable field(s) on target form.")
+            dev_logger.log("SUCCESS", f"Identified {len(fields)} interactable field(s) on initial view.")
 
             # Define callbacks for GUI synchronization
             def on_field_fill(label: str, status_str: str, val: str):
@@ -353,7 +434,7 @@ def _run_autofill_worker():
             with session.lock:
                 session.status = "filling"
 
-            summary = filler.fill_all_fields(fields)
+            summary = filler.fill_multi_step_form(extractor)
             post_screenshot_path = extractor.capture_screenshot("post_fill")
             dev_logger.log("SUCCESS", f"Autofill execution complete. Filled: {summary.fields_filled}, Skipped: {summary.fields_skipped}, Added to QA: {summary.questions_added_to_qa}")
 
@@ -375,7 +456,7 @@ def _run_autofill_worker():
             final_status = "REVIEWED_NOT_SUBMITTED"
             if session.submit_decision is True:
                 dev_logger.log("INFO", "User confirmed submission. Locating submit button...")
-                submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Submit Application')").first
+                submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Submit Application'), button:has-text('Submit application')").first
                 if submit_btn.count() > 0:
                     submit_btn.click()
                     time.sleep(3)
@@ -413,8 +494,8 @@ def _run_autofill_worker():
                 session.error_message = str(e)
             dev_logger.log("ERROR", f"Error in Playwright worker: {str(e)}")
         finally:
-            browser.close()
-            dev_logger.log("INFO", "Playwright browser session closed.")
+            context.close()
+            dev_logger.log("INFO", "Playwright persistent browser session closed.")
 
 
 @app.post("/api/autofill/start")
