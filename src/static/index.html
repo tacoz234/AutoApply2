@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApplyFlow Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&family=Space+Grotesk:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-icon">⚡</span>
+        <div>
+          <h1 class="brand-title">ApplyFlow</h1>
+          <div class="brand-badge-row">
+            <span class="brand-sticker">LOCAL AI</span>
+            <span class="brand-hand-note">no cloud · 100% private</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="tab-apply">
+          <span class="nav-icon">🚀</span>
+          <span>Apply Now</span>
+        </button>
+        <button class="nav-item" data-tab="tab-profile">
+          <span class="nav-icon">👤</span>
+          <span>Master Profile</span>
+        </button>
+        <button class="nav-item" data-tab="tab-qa">
+          <span class="nav-icon">💡</span>
+          <span>QA Knowledge Bank</span>
+        </button>
+        <button class="nav-item" data-tab="tab-history">
+          <span class="nav-icon">📊</span>
+          <span>Application History</span>
+        </button>
+      </nav>
+
+      <!-- Mock Server Quick Status -->
+      <div class="mock-status-box">
+        <div class="mock-status-header">
+          <span class="mock-dot" id="mock-status-dot"></span>
+          <span class="mock-title">Mock ATS Server</span>
+        </div>
+        <p class="mock-desc">Local test environment (port 8088)</p>
+        <button id="btn-toggle-mock" class="btn btn-sm btn-outline">Start Mock Server</button>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="btn-reopen-setup" class="btn btn-dev-logs" title="Open first-time setup & resume onboarding wizard">
+          <span class="dev-logs-icon">🚀</span>
+          <span class="dev-logs-label">Setup Wizard</span>
+          <span id="setup-status-pill" class="dev-logs-badge" style="background: var(--accent-yellow); color: var(--ink);">SETUP</span>
+        </button>
+        <button id="btn-open-dev-logs" class="btn btn-dev-logs" title="Open real-time developer activity console">
+          <span class="dev-logs-icon">💻</span>
+          <span class="dev-logs-label">Developer Logs</span>
+          <span id="dev-logs-badge" class="dev-logs-badge">0</span>
+        </button>
+        <p class="privacy-badge">🔒 100% Local Inference & Storage</p>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+
+      <!-- TAB 1: APPLY NOW -->
+      <section id="tab-apply" class="tab-pane active">
+        <header class="page-header">
+          <div>
+            <h2 class="page-title">Automated Job Application Flow</h2>
+            <p class="page-desc">Ingest postings via screen reading, run brutal candidate fit analysis, and autofill forms safely.</p>
+          </div>
+        </header>
+
+        <!-- URL Input Card -->
+        <div class="card url-card brutal-card-accent">
+          <div class="tape-strip tape-top-center"></div>
+          <div class="url-label-row">
+            <span class="hand-annotation">✎ Paste job posting link below (Greenhouse, Lever, Ashby, or Mock ATS):</span>
+            <span class="badge badge-black">STEP 1: SCREEN INGESTION</span>
+          </div>
+          <div class="url-input-group">
+            <input type="url" id="target-url-input" class="form-control" placeholder="https://boards.greenhouse.io/... or http://127.0.0.1:8088/" />
+            <button id="btn-scan" class="btn btn-primary">
+              <span id="scan-btn-text">⚡ Scan & Evaluate Match</span>
+            </button>
+            <button id="btn-quick-mock" class="btn btn-secondary" title="Paste local mock ATS URL">
+              🧪 Use Mock ATS
+            </button>
+          </div>
+        </div>
+
+        <!-- Scanning State Indicator -->
+        <div id="scan-loading" class="scan-loading-card" style="display: none;">
+          <div class="spinner brutal-spinner"></div>
+          <div>
+            <h3 class="loading-title">Inspecting Job Posting & Reading Screen...</h3>
+            <p class="loading-desc">Playwright is capturing the page screen and local model is running gap analysis.</p>
+          </div>
+        </div>
+
+        <!-- Step 2: Evaluation Scorecard Card -->
+        <div id="scorecard-container" class="card scorecard-card" style="display: none;">
+          <div class="tape-strip tape-top-right"></div>
+          <div class="scorecard-layout">
+            <!-- Left: Job Summary & Screen Snapshot -->
+            <div class="scorecard-job-summary">
+              <div class="job-meta">
+                <span class="badge badge-info" id="job-company-badge">Company</span>
+                <h3 id="job-title-display" class="job-title-text">Senior Software Engineer</h3>
+              </div>
+              
+              <div class="screenshot-preview-box">
+                <div class="screenshot-box-header">
+                  <p class="subtle-label">Visual Ingestion Snapshot</p>
+                  <span class="click-hint">🔍 Click to Expand</span>
+                </div>
+                <div class="screenshot-interactive-wrapper" id="job-screenshot-wrapper">
+                  <div class="tape-corner tape-corner-tl"></div>
+                  <div class="tape-corner tape-corner-tr"></div>
+                  <img id="job-screenshot-img" src="" alt="Job Screen Preview" class="screenshot-thumb" />
+                  <div class="screenshot-hover-overlay">
+                    <span class="zoom-badge">🔍 Inspect Full Screen</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="job-desc-snippet">
+                <p class="subtle-label">Description Excerpt</p>
+                <div id="job-desc-text" class="desc-box"></div>
+              </div>
+            </div>
+
+            <!-- Right: Brutally Honest Scorecard -->
+            <div class="scorecard-rubric">
+              <div class="score-header">
+                <div>
+                  <h4 class="rubric-title">The Brutally Honest Match Rubric</h4>
+                  <p class="rubric-subtitle">Cynical recruiter gap analysis against your master resume</p>
+                </div>
+                <div class="score-badge-circle rubber-stamp" id="score-chance-badge">
+                  <span id="score-chance-val">0%</span>
+                  <span class="score-chance-label">Callback Chance</span>
+                </div>
+              </div>
+
+              <!-- Recommendation Pill -->
+              <div class="rec-banner stamp-banner" id="rec-banner">
+                Recommendation: <strong id="score-recommendation-val">BORDERLINE</strong>
+              </div>
+
+              <!-- Dealbreakers (if present) -->
+              <div id="dealbreakers-box" class="rubric-section alert-box alert-danger sticky-note sticky-danger" style="display: none;">
+                <h5>⚠️ Flagged Dealbreakers</h5>
+                <ul id="dealbreakers-list"></ul>
+              </div>
+
+              <!-- Brutal Reality -->
+              <div class="rubric-section alert-box alert-warning sticky-note sticky-warning">
+                <h5>🔥 The Brutal Reality (Likely ATS Rejection Causes)</h5>
+                <ul id="brutal-reality-list"></ul>
+              </div>
+
+              <!-- Strengths -->
+              <div class="rubric-section alert-box alert-success sticky-note sticky-success">
+                <h5>✨ Genuine Alignment & Strengths</h5>
+                <ul id="strengths-list"></ul>
+              </div>
+
+              <!-- Action Bar -->
+              <div class="scorecard-actions">
+                <button id="btn-proceed-autofill" class="btn btn-success btn-lg">
+                  Proceed with Autofill ⚡
+                </button>
+                <button id="btn-abort-autofill" class="btn btn-outline">
+                  Abort & Pass
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Live Autofill Progress -->
+        <div id="autofill-progress-container" class="card" style="display: none;">
+          <div class="progress-card-header">
+            <div class="live-indicator">
+              <span class="pulsing-dot"></span>
+              <h4>Live Playwright Autofill Progress</h4>
+            </div>
+            <span class="badge badge-info" id="autofill-status-pill">Active Browser Session</span>
+          </div>
+
+          <p class="progress-sub">Chromium is executing on screen. Fields are populated sequentially.</p>
+
+          <div class="table-wrapper">
+            <table class="data-table" id="fill-steps-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Form Field</th>
+                  <th>Status</th>
+                  <th>Value / Result</th>
+                </tr>
+              </thead>
+              <tbody id="fill-steps-body">
+                <!-- Live steps appended dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Step 4: Pre-Flight Review & Safety Submission Gate -->
+        <div id="preflight-container" class="card preflight-card" style="display: none;">
+          <div class="hazard-stripe-bar"></div>
+          <div class="preflight-header">
+            <div class="safety-badge stamp-badge">🛡️ SAFETY GATE ACTIVE</div>
+            <h3 class="preflight-title">Pre-Flight Visual Inspection</h3>
+            <p>Autofill complete. The browser window is open for your inspection. ApplyFlow will never auto-submit without your explicit confirmation.</p>
+          </div>
+
+          <div class="preflight-stats-grid">
+            <div class="stat-card">
+              <div class="stat-num" id="stat-filled">0</div>
+              <div class="stat-label">Fields Filled</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-num" id="stat-skipped">0</div>
+              <div class="stat-label">Fields Skipped</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-num" id="stat-qa-added">0</div>
+              <div class="stat-label">Learned QA Questions</div>
+            </div>
+          </div>
+
+          <div class="screenshot-review-section">
+            <div class="screenshot-box-header" style="justify-content: center; margin-bottom: 8px;">
+              <h4>Post-Fill Visual Verification</h4>
+              <span class="click-hint">🔍 Click to Expand</span>
+            </div>
+            <div class="screenshot-interactive-wrapper" id="post-fill-screenshot-wrapper" style="max-width: 820px; margin: 0 auto;">
+              <div class="tape-corner tape-corner-tl"></div>
+              <div class="tape-corner tape-corner-tr"></div>
+              <img id="post-fill-screenshot-img" src="" alt="Completed Form Screenshot" class="screenshot-post" />
+              <div class="screenshot-hover-overlay">
+                <span class="zoom-badge">🔍 Inspect Full Screen</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="preflight-actions">
+            <button id="btn-final-submit" class="btn btn-primary btn-lg">
+              Confirm & Click Final Submit in Browser
+            </button>
+            <button id="btn-final-leave-open" class="btn btn-outline btn-lg">
+              Finish (Leave Unsubmitted)
+            </button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- TAB 2: MASTER PROFILE -->
+      <section id="tab-profile" class="tab-pane">
+        <header class="page-header">
+          <div>
+            <h2 class="page-title">Candidate Master Profile</h2>
+            <p class="page-desc">Canonical resume data used for Stage 1 autofill matching and gap scoring.</p>
+          </div>
+          <button id="btn-save-profile" class="btn btn-primary">Save Profile Changes</button>
+        </header>
+
+        <!-- Dedicated Resume Upload & Auto-Fill Card -->
+        <div class="card resume-upload-card brutal-card-accent" style="margin-bottom: 24px;">
+          <div class="tape-strip tape-top-right"></div>
+          <div class="resume-card-header">
+            <div>
+              <span class="badge badge-black">AI RESUME INGESTION</span>
+              <h3 class="card-title" style="margin-top: 6px; margin-bottom: 4px;">Master Resume & Automated Profile Extraction</h3>
+              <p class="page-desc">Upload your resume PDF/Word file. ApplyFlow extracts all fields locally and automatically populates the form below.</p>
+            </div>
+            <div class="active-resume-badge-wrap">
+              <span class="subtle-label">Active Resume File:</span>
+              <span class="badge badge-success" id="active-resume-badge">sample_resume.pdf</span>
+            </div>
+          </div>
+
+          <div class="resume-dropzone" id="profile-resume-dropzone" style="margin-top: 14px;">
+            <input type="file" id="profile-resume-file-input" accept=".pdf,.docx,.txt" style="display: none;" />
+            <div class="dropzone-content">
+              <span class="dropzone-icon">📄</span>
+              <div class="dropzone-text">
+                <strong>Click to browse or drag & drop a new resume file here</strong>
+                <p>Supports .PDF, .DOCX, .TXT · Extracts contact info, skills, links & history locally</p>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-browse-profile-resume">
+                Choose Resume File
+              </button>
+            </div>
+          </div>
+
+          <div id="profile-upload-status" class="upload-status-bar" style="display: none; margin-top: 12px;">
+            <div class="spinner brutal-spinner-sm"></div>
+            <span id="profile-upload-msg">Uploading and parsing resume with local AI...</span>
+          </div>
+        </div>
+
+        <div class="profile-grid">
+          <!-- Personal Info Card -->
+          <div class="card">
+            <h3 class="card-title">Personal & Contact Details</h3>
+            <div class="form-row">
+              <div class="form-col">
+                <label>First Name</label>
+                <input type="text" id="prof-first-name" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Last Name</label>
+                <input type="text" id="prof-last-name" class="form-control" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Full Name</label>
+              <input type="text" id="prof-full-name" class="form-control" />
+            </div>
+            <div class="form-row">
+              <div class="form-col">
+                <label>Email Address</label>
+                <input type="email" id="prof-email" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Phone Number</label>
+                <input type="tel" id="prof-phone" class="form-control" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Street Address</label>
+              <input type="text" id="prof-address" class="form-control" />
+            </div>
+            <div class="form-row">
+              <div class="form-col">
+                <label>City</label>
+                <input type="text" id="prof-city" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>State</label>
+                <input type="text" id="prof-state" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Postal Code</label>
+                <input type="text" id="prof-postal" class="form-control" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Web Links & Work Auth -->
+          <div class="card">
+            <h3 class="card-title">Professional Links</h3>
+            <div class="form-group">
+              <label>LinkedIn Profile URL</label>
+              <input type="url" id="prof-linkedin" class="form-control" />
+            </div>
+            <div class="form-group">
+              <label>GitHub Profile URL</label>
+              <input type="url" id="prof-github" class="form-control" />
+            </div>
+            <div class="form-group">
+              <label>Portfolio / Personal Website</label>
+              <input type="url" id="prof-portfolio" class="form-control" />
+            </div>
+
+            <h3 class="card-title" style="margin-top: 24px;">Work Authorization & Clearance</h3>
+            <div class="form-group">
+              <label>Legally Authorized to Work in US?</label>
+              <select id="prof-auth-us" class="form-control">
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Require Visa Sponsorship?</label>
+              <select id="prof-auth-sponsorship" class="form-control">
+                <option value="No">No</option>
+                <option value="Yes">Yes</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Security Clearance Level</label>
+              <select id="prof-auth-clearance" class="form-control">
+                <option value="None">None</option>
+                <option value="Confidential">Confidential</option>
+                <option value="Secret">Secret</option>
+                <option value="Top Secret">Top Secret</option>
+                <option value="TS/SCI">TS/SCI</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Skills & Resume File -->
+          <div class="card" style="grid-column: 1 / -1;">
+            <h3 class="card-title">Core Skills & Resume File</h3>
+            <div class="form-group">
+              <label>Skills (Comma-separated keywords)</label>
+              <textarea id="prof-skills" class="form-control" rows="3" placeholder="Python, FastAPI, Docker, Kubernetes, AWS..."></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-col">
+                <label>Configured Resume PDF (Inside data/)</label>
+                <input type="text" id="prof-resume-file" class="form-control" value="sample_resume.pdf" />
+              </div>
+              <div class="form-col">
+                <label>Desired Salary ($)</label>
+                <input type="text" id="prof-salary" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Notice Period</label>
+                <input type="text" id="prof-notice" class="form-control" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: QA KNOWLEDGE BANK -->
+      <section id="tab-qa" class="tab-pane">
+        <header class="page-header">
+          <div>
+            <h2 class="page-title">QA Knowledge Bank</h2>
+            <p class="page-desc">Every time you answer a missing question during autofill, ApplyFlow remembers it permanently.</p>
+          </div>
+          <button id="btn-open-add-qa-modal" class="btn btn-primary">+ Add New Q&A Pair</button>
+        </header>
+
+        <div class="card">
+          <div class="qa-search-bar">
+            <input type="text" id="qa-search-input" class="form-control" placeholder="Search saved question patterns or answers..." />
+          </div>
+
+          <div class="table-wrapper">
+            <table class="data-table" id="qa-table">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Recognized Question Patterns</th>
+                  <th>Saved Answer</th>
+                  <th>Type</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="qa-table-body">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: APPLICATION HISTORY -->
+      <section id="tab-history" class="tab-pane">
+        <header class="page-header">
+          <div>
+            <h2 class="page-title">Application Run History</h2>
+            <p class="page-desc">Audit trail of all applications evaluated, autofilled, or submitted.</p>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="table-wrapper">
+            <table class="data-table" id="history-table">
+              <thead>
+                <tr>
+                  <th>Applied At</th>
+                  <th>Company</th>
+                  <th>Job Title</th>
+                  <th>Match Score</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="history-table-body">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MODAL: Missing Question Prompt (Stage 3) -->
+  <div id="modal-question" class="modal-overlay" style="display: none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-icon">❓</span>
+        <div>
+          <h3>Question Needed for Form</h3>
+          <p>This field was not found in your profile or QA bank. Answer it once and it will be remembered forever.</p>
+        </div>
+      </div>
+      <div class="modal-body">
+        <label id="modal-q-label" class="question-prompt-text">"Question Label"</label>
+        
+        <div id="modal-q-options-container" style="display: none; margin-bottom: 12px;">
+          <p class="subtle-label">Select from form options:</p>
+          <div id="modal-q-options-list" class="options-pills"></div>
+        </div>
+
+        <input type="text" id="modal-q-input" class="form-control" placeholder="Enter your answer..." />
+      </div>
+      <div class="modal-footer">
+        <button id="btn-submit-q-answer" class="btn btn-primary">Save & Continue Autofill</button>
+        <button id="btn-skip-q-answer" class="btn btn-outline">Skip Field</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Open-Ended Essay Draft Review (Stage 4) -->
+  <div id="modal-essay" class="modal-overlay" style="display: none;">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <span class="modal-icon">✍️</span>
+        <div>
+          <h3>Tailored Essay Response Draft</h3>
+          <p>The local LLM drafted a punchy 3-to-4 sentence response tailored to the job description and your background.</p>
+        </div>
+      </div>
+      <div class="modal-body">
+        <label id="modal-essay-question" class="question-prompt-text">"Why do you want to join our engineering team?"</label>
+        <textarea id="modal-essay-text" class="form-control essay-textarea" rows="6"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-essay-accept" class="btn btn-success">Accept & Insert</button>
+        <button id="btn-essay-edit" class="btn btn-primary">Apply Custom Edit</button>
+        <button id="btn-essay-skip" class="btn btn-outline">Skip Question</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Add New QA Pair -->
+  <div id="modal-add-qa" class="modal-overlay" style="display: none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-icon">➕</span>
+        <div>
+          <h3>Add Question to Knowledge Bank</h3>
+          <p>Teach ApplyFlow how to answer a specific question on future applications.</p>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Question or Pattern</label>
+          <input type="text" id="add-qa-question" class="form-control" placeholder="e.g. Do you hold an active secret clearance?" />
+        </div>
+        <div class="form-group">
+          <label>Your Standard Answer</label>
+          <input type="text" id="add-qa-answer" class="form-control" placeholder="e.g. Secret" />
+        </div>
+        <div class="form-row">
+          <div class="form-col">
+            <label>Field Type</label>
+            <select id="add-qa-type" class="form-control">
+              <option value="text">Text Input</option>
+              <option value="select">Dropdown / Select</option>
+              <option value="radio">Radio Button</option>
+              <option value="checkbox">Checkbox</option>
+            </select>
+          </div>
+          <div class="form-col">
+            <label>Category</label>
+            <input type="text" id="add-qa-category" class="form-control" value="custom" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-save-new-qa" class="btn btn-primary">Save to Bank</button>
+        <button id="btn-cancel-new-qa" class="btn btn-outline">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Screenshot Lightbox Zoom Viewer -->
+  <div id="modal-screenshot-lightbox" class="lightbox-overlay" style="display: none;">
+    <div class="lightbox-container">
+      <div class="lightbox-header">
+        <div class="lightbox-title-group">
+          <span class="lightbox-icon">🖼️</span>
+          <div>
+            <h4 id="lightbox-title">Screenshot Inspection</h4>
+            <span id="lightbox-filename" class="lightbox-meta">screenshot.png</span>
+          </div>
+        </div>
+        <div class="lightbox-controls">
+          <button id="btn-zoom-in" class="btn btn-sm btn-outline" title="Zoom In (+)">➕ Zoom In</button>
+          <button id="btn-zoom-reset" class="btn btn-sm btn-outline" title="Reset Zoom (100%)">100%</button>
+          <button id="btn-zoom-out" class="btn btn-sm btn-outline" title="Zoom Out (-)">➖ Zoom Out</button>
+          <a id="btn-open-external" href="#" target="_blank" class="btn btn-sm btn-outline" title="Open in New Browser Tab">↗️ Open Full Tab</a>
+          <button id="btn-close-lightbox" class="btn btn-sm btn-danger" title="Close Viewer (ESC)">✕ Close</button>
+        </div>
+      </div>
+      <div class="lightbox-viewport" id="lightbox-viewport">
+        <div class="lightbox-pan-surface" id="lightbox-pan-surface">
+          <img id="lightbox-img" src="" alt="Expanded View" class="lightbox-image" />
+        </div>
+      </div>
+      <div class="lightbox-footer">
+        <p>💡 Tip: Use mouse wheel or buttons to zoom. Click and drag image to pan around.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Developer Console / Engine Logs Drawer -->
+  <div id="modal-dev-logs" class="dev-logs-overlay" style="display: none;">
+    <div class="dev-logs-panel">
+      <div class="dev-logs-header">
+        <div class="dev-logs-title-group">
+          <div class="terminal-dots">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+          <h3 class="dev-logs-title">Developer & Engine Console</h3>
+          <span class="badge badge-info" id="dev-logs-count">0 events</span>
+        </div>
+        <div class="dev-logs-actions">
+          <div class="log-filter-pills">
+            <button class="filter-pill active" data-filter="ALL">ALL</button>
+            <button class="filter-pill" data-filter="INFO">INFO</button>
+            <button class="filter-pill" data-filter="SUCCESS">SUCCESS</button>
+            <button class="filter-pill" data-filter="WARN">WARN</button>
+            <button class="filter-pill" data-filter="ERROR">ERROR</button>
+          </div>
+          <label class="auto-scroll-label">
+            <input type="checkbox" id="chk-auto-scroll" checked /> Auto-scroll
+          </label>
+          <button id="btn-copy-logs" class="btn btn-sm btn-outline" title="Copy logs to clipboard">📋 Copy</button>
+          <button id="btn-clear-logs" class="btn btn-sm btn-outline" title="Clear log buffer">🗑️ Clear</button>
+          <button id="btn-close-dev-logs" class="btn btn-sm btn-danger">✕ Close</button>
+        </div>
+      </div>
+      <div class="dev-logs-terminal" id="dev-logs-terminal">
+        <div class="terminal-welcome">ApplyFlow real-time engine activity log loaded. Ready for pipeline events.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: First-Time Setup Wizard -->
+  <div id="modal-setup-wizard" class="modal-overlay" style="display: none;">
+    <div class="modal-box modal-xl" style="max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="hazard-stripe-bar" style="margin: -28px -28px 16px -28px;"></div>
+      <div class="modal-header" style="justify-content: space-between; align-items: flex-start;">
+        <div style="display: flex; gap: 14px; align-items: center;">
+          <span class="modal-icon">⚡</span>
+          <div>
+            <h3>Welcome to ApplyFlow Setup</h3>
+            <p class="brand-hand-note" style="font-size: 16px; margin-top: 2px;">Local AI Job Application Engine · First-Time Candidate Setup</p>
+          </div>
+        </div>
+        <span class="badge badge-warning" id="wizard-step-pill">STEP 1: UPLOAD RESUME</span>
+      </div>
+
+      <div class="modal-body wizard-body" style="overflow-y: auto; flex-grow: 1; padding-right: 4px;">
+        <!-- Step 1: Upload Dropzone -->
+        <div class="wizard-step-section">
+          <div class="wizard-step-header" style="margin-bottom: 10px;">
+            <h4 style="font-size: 16px; font-weight: 900;">1. Upload Your Master Resume</h4>
+            <span class="hand-annotation">✎ Drop your resume PDF here. Local AI will read it and auto-fill your profile ↓</span>
+          </div>
+
+          <div class="resume-dropzone" id="wizard-resume-dropzone">
+            <input type="file" id="wizard-resume-file-input" accept=".pdf,.docx,.txt" style="display: none;" />
+            <div class="dropzone-content">
+              <span class="dropzone-icon">📄</span>
+              <div class="dropzone-text">
+                <strong>Drag & drop your resume file here, or click to browse</strong>
+                <p>Supports .PDF, .DOCX, .TXT · Extracted 100% locally with PyMuPDF & Ollama</p>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-browse-wizard-resume">
+                Browse Resume File
+              </button>
+            </div>
+          </div>
+
+          <div id="wizard-upload-status" class="upload-status-bar" style="display: none; margin-top: 10px;">
+            <div class="spinner brutal-spinner-sm"></div>
+            <span id="wizard-upload-msg">Reading resume text & extracting candidate details...</span>
+          </div>
+
+          <div id="wizard-parsed-banner" class="alert-box alert-success" style="display: none; margin-top: 14px;">
+            <h5 id="wizard-parsed-summary">✓ Resume successfully extracted! Review the information below:</h5>
+          </div>
+        </div>
+
+        <!-- Step 2: Review & Edit Extracted Information -->
+        <div class="wizard-step-section" style="margin-top: 24px;">
+          <div class="wizard-step-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <h4 style="font-size: 16px; font-weight: 900;">2. Review & Edit Extracted Candidate Profile</h4>
+            <span class="subtle-label">All fields editable before saving</span>
+          </div>
+
+          <div class="wizard-fields-grid">
+            <div class="form-row">
+              <div class="form-col">
+                <label>First Name</label>
+                <input type="text" id="wiz-first-name" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Last Name</label>
+                <input type="text" id="wiz-last-name" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Full Name</label>
+                <input type="text" id="wiz-full-name" class="form-control" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-col">
+                <label>Email Address</label>
+                <input type="email" id="wiz-email" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Phone Number</label>
+                <input type="tel" id="wiz-phone" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>City & State</label>
+                <input type="text" id="wiz-location" class="form-control" placeholder="e.g. Seattle, WA" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-col">
+                <label>LinkedIn URL</label>
+                <input type="url" id="wiz-linkedin" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>GitHub URL</label>
+                <input type="url" id="wiz-github" class="form-control" />
+              </div>
+              <div class="form-col">
+                <label>Portfolio / Personal Website</label>
+                <input type="url" id="wiz-portfolio" class="form-control" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Extracted Core Skills (Comma-separated)</label>
+              <textarea id="wiz-skills" class="form-control" rows="2" placeholder="Python, Docker, Kubernetes, AWS..."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: QA Knowledge Bank Screening Setup -->
+        <div class="wizard-step-section" style="margin-top: 24px;">
+          <div class="wizard-step-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h4 style="font-size: 16px; font-weight: 900;">3. QA Knowledge Bank — ATS Screening Answers</h4>
+              <p class="brand-hand-note" style="font-size: 15px;">✎ Set these once. ApplyFlow uses them to auto-fill tricky ATS screening questions on every job.</p>
+            </div>
+            <span class="badge badge-black">AUTOFILL MEMORY</span>
+          </div>
+
+          <div class="wizard-fields-grid">
+            <!-- Work Auth & Security -->
+            <div class="form-row">
+              <div class="form-col">
+                <label>Legally Authorized to Work in US?</label>
+                <select id="wiz-qa-auth" class="form-control">
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+              <div class="form-col">
+                <label>Require Visa Sponsorship (Now or Future)?</label>
+                <select id="wiz-qa-sponsorship" class="form-control">
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </div>
+              <div class="form-col">
+                <label>Security Clearance Level</label>
+                <select id="wiz-qa-clearance" class="form-control">
+                  <option value="None">None</option>
+                  <option value="Confidential">Confidential</option>
+                  <option value="Secret">Secret</option>
+                  <option value="Top Secret">Top Secret</option>
+                  <option value="TS/SCI">TS/SCI</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Availability, Compensation & Experience -->
+            <div class="form-row">
+              <div class="form-col">
+                <label>Earliest Start Date / Notice Period</label>
+                <input type="text" id="wiz-qa-notice" class="form-control" value="2 weeks" placeholder="e.g. 2 weeks, Immediately" />
+              </div>
+              <div class="form-col">
+                <label>Target Salary Expectation ($)</label>
+                <input type="text" id="wiz-qa-salary" class="form-control" value="165,000" placeholder="e.g. 165,000" />
+              </div>
+              <div class="form-col">
+                <label>Years of Professional Experience</label>
+                <input type="text" id="wiz-qa-yoe" class="form-control" value="5" placeholder="e.g. 5" />
+              </div>
+            </div>
+
+            <!-- Workplace & Background -->
+            <div class="form-row">
+              <div class="form-col">
+                <label>Comfortable Working Remotely?</label>
+                <select id="wiz-qa-remote" class="form-control">
+                  <option value="Yes">Yes</option>
+                  <option value="Hybrid Only">Hybrid Only</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+              <div class="form-col">
+                <label>Willing to Undergo Background Check?</label>
+                <select id="wiz-qa-background" class="form-control">
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Voluntary Demographics (EEOC) Defaults -->
+            <div class="form-row">
+              <div class="form-col">
+                <label>Gender (EEOC Default)</label>
+                <select id="wiz-qa-gender" class="form-control">
+                  <option value="Decline to self-identify">Decline to self-identify</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Non-binary">Non-binary</option>
+                </select>
+              </div>
+              <div class="form-col">
+                <label>Protected Veteran Status</label>
+                <select id="wiz-qa-veteran" class="form-control">
+                  <option value="I am not a protected veteran">I am not a protected veteran</option>
+                  <option value="I identify as one or more of the classifications of protected veteran">Protected Veteran</option>
+                  <option value="I decline to self-identify">I decline to self-identify</option>
+                </select>
+              </div>
+              <div class="form-col">
+                <label>Disability Status</label>
+                <select id="wiz-qa-disability" class="form-control">
+                  <option value="No, I do not have a disability">No, I do not have a disability</option>
+                  <option value="Yes, I have a disability">Yes, I have a disability</option>
+                  <option value="I do not wish to answer">I do not wish to answer</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Optional Custom Q&A Pair -->
+            <div class="form-group" style="margin-top: 10px; padding: 12px; background: #faf8f2; border: 1.5px dashed var(--ink); border-radius: var(--radius-sm);">
+              <span class="subtle-label" style="display: block; margin-bottom: 8px;">+ Add Custom Q&A to Bank (Optional)</span>
+              <div class="form-row" style="margin-bottom: 0;">
+                <div class="form-col" style="flex: 1.5;">
+                  <input type="text" id="wiz-custom-q" class="form-control" placeholder="Custom question pattern, e.g. 'Are you 21 years of age or older?'" />
+                </div>
+                <div class="form-col" style="flex: 1;">
+                  <input type="text" id="wiz-custom-a" class="form-control" placeholder="Your standard answer, e.g. 'Yes'" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="justify-content: space-between; align-items: center; margin-top: 16px;">
+        <button id="btn-skip-setup" class="btn btn-outline" type="button">
+          Skip for Now (Enter Manually Later)
+        </button>
+        <button id="btn-complete-setup" class="btn btn-primary btn-lg" type="button">
+          Save Everything & Launch ApplyFlow 🚀
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

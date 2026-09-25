@@ -1,0 +1,672 @@
+"""FastAPI GUI Backend Server for ApplyFlow.
+
+Exposes REST and state-polling endpoints to drive ApplyFlow from a modern web dashboard.
+"""
+
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import threading
+import time
+from typing import Any, Dict, List, Optional
+from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from playwright.sync_api import sync_playwright
+
+from src.resume_parser import ResumeParser
+
+from src.config import (
+    BROWSER_TIMEOUT_MS,
+    DATA_DIR,
+    HEADLESS,
+    ROOT_DIR,
+    SCREENSHOTS_DIR,
+    SLOW_MO_MS,
+    USER_AGENT,
+    VIEWPORT,
+)
+from src.extractor import ExtractedField, FormExtractor
+from src.filler import FillSummary, FormFiller
+from src.scorer import JobScorer, MatchScoreResult
+from src.storage import ApplicationLog, QABankEntry, StorageManager, UserProfile
+from tests.mock_ats_server import MockATSHandler
+from http.server import HTTPServer
+
+
+app = FastAPI(title="ApplyFlow Dashboard API")
+
+# Allow CORS for development convenience
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class AutofillSession:
+    """Manages thread-safe state for an active autofill application run."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.status = "idle"  # idle, scanning, scan_complete, filling, waiting_for_input, waiting_for_essay, review_ready, completed, aborted, error
+        self.url = ""
+        self.job_title = ""
+        self.company = ""
+        self.description = ""
+        self.initial_screenshot = ""
+        self.post_screenshot = ""
+        self.score_result: Optional[Dict[str, Any]] = None
+        self.fill_steps: List[Dict[str, Any]] = []
+        self.summary: Dict[str, Any] = {"filled": 0, "skipped": 0, "added": 0}
+        self.error_message = ""
+
+        # Thread synchronization events
+        self.input_event = threading.Event()
+        self.pending_question: Optional[Dict[str, Any]] = None
+        self.user_answer: Optional[str] = None
+
+        self.essay_event = threading.Event()
+        self.pending_essay: Optional[Dict[str, Any]] = None
+        self.essay_decision: Optional[Dict[str, str]] = None
+
+        self.submit_event = threading.Event()
+        self.submit_decision: Optional[bool] = None
+
+        # Playwright thread handle
+        self.thread: Optional[threading.Thread] = None
+
+    def reset(self):
+        with self.lock:
+            self.status = "idle"
+            self.url = ""
+            self.job_title = ""
+            self.company = ""
+            self.description = ""
+            self.initial_screenshot = ""
+            self.post_screenshot = ""
+            self.score_result = None
+            self.fill_steps = []
+            self.summary = {"filled": 0, "skipped": 0, "added": 0}
+            self.error_message = ""
+            self.pending_question = None
+            self.user_answer = None
+            self.pending_essay = None
+            self.essay_decision = None
+            self.submit_decision = None
+            self.input_event.clear()
+            self.essay_event.clear()
+            self.submit_event.clear()
+
+
+class DevLogger:
+    """Thread-safe developer activity logger."""
+
+    def __init__(self, max_entries: int = 1000):
+        self.lock = threading.Lock()
+        self.entries: List[Dict[str, Any]] = []
+        self.max_entries = max_entries
+
+    def log(self, level: str, message: str, details: Optional[Any] = None):
+        with self.lock:
+            entry = {
+                "id": len(self.entries) + 1,
+                "timestamp": datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
+                "level": level.upper(),  # INFO, SUCCESS, WARN, ERROR, DEBUG
+                "message": message,
+                "details": details,
+            }
+            self.entries.append(entry)
+            if len(self.entries) > self.max_entries:
+                self.entries.pop(0)
+
+    def get_logs(self, since_id: int = 0) -> List[Dict[str, Any]]:
+        with self.lock:
+            if since_id == 0:
+                return list(self.entries)
+            return [e for e in self.entries if e["id"] > since_id]
+
+    def clear(self):
+        with self.lock:
+            self.entries.clear()
+
+
+dev_logger = DevLogger()
+dev_logger.log("INFO", "ApplyFlow GUI Backend initialized and ready.")
+
+session = AutofillSession()
+storage = StorageManager()
+scorer = JobScorer()
+resume_parser = ResumeParser()
+
+# Mock ATS server thread
+mock_server_instance: Optional[HTTPServer] = None
+mock_server_thread: Optional[threading.Thread] = None
+
+
+class ScanRequest(BaseModel):
+    url: str
+
+
+class AutofillStartRequest(BaseModel):
+    url: Optional[str] = None
+
+
+class AnswerRequest(BaseModel):
+    answer: str
+
+
+class EssayDecisionRequest(BaseModel):
+    choice: str  # accept, edit, skip
+    text: Optional[str] = None
+
+
+class FinalSubmitRequest(BaseModel):
+    submit: bool
+
+
+# --- API Routes ---
+
+@app.get("/api/status")
+def get_status():
+    """Returns current active autofill session state."""
+    with session.lock:
+        return {
+            "status": session.status,
+            "url": session.url,
+            "job_title": session.job_title,
+            "company": session.company,
+            "description": session.description,
+            "initial_screenshot": session.initial_screenshot,
+            "post_screenshot": session.post_screenshot,
+            "score_result": session.score_result,
+            "fill_steps": session.fill_steps,
+            "summary": session.summary,
+            "pending_question": session.pending_question,
+            "pending_essay": session.pending_essay,
+            "error_message": session.error_message,
+        }
+
+
+@app.post("/api/scan")
+def scan_job_url(req: ScanRequest):
+    """Navigates to URL, captures screenshot, and generates Brutal Match Score."""
+    session.reset()
+    session.url = req.url.strip()
+    session.status = "scanning"
+
+    dev_logger.log("INFO", f"Starting job scan for URL: {session.url}")
+    profile = storage.load_profile()
+
+    try:
+        dev_logger.log("INFO", "Launching headless Chromium for initial ingestion...")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(viewport=VIEWPORT, user_agent=USER_AGENT)
+            page.set_default_timeout(BROWSER_TIMEOUT_MS)
+            
+            dev_logger.log("INFO", f"Navigating to {session.url}...")
+            page.goto(session.url, wait_until="domcontentloaded")
+            time.sleep(2)
+
+            dev_logger.log("INFO", "Inspecting page layout and extracting job metadata...")
+            extractor = FormExtractor(page)
+            job_info = extractor.extract_job_info()
+
+            session.job_title = job_info.title
+            session.company = job_info.company
+            session.description = job_info.description
+
+            dev_logger.log("SUCCESS", f"Extracted Job: '{job_info.title}' at '{job_info.company}'")
+
+            if job_info.screenshot_path:
+                session.initial_screenshot = f"/screenshots/{Path(job_info.screenshot_path).name}"
+                dev_logger.log("INFO", f"Saved initial visual screenshot: {Path(job_info.screenshot_path).name}")
+
+            # Calculate Brutally Honest Gap Score
+            dev_logger.log("INFO", f"Invoking cynical recruiter gap analysis model ({scorer.model})...")
+            score = scorer.score_match(
+                job_title=job_info.title,
+                company=job_info.company,
+                job_description=job_info.description,
+                user_profile=profile,
+                screenshot_path=job_info.screenshot_path,
+            )
+
+            session.score_result = score.model_dump()
+            session.status = "scan_complete"
+            dev_logger.log("SUCCESS", f"Match Score Calculated: {score.estimated_callback_chance}% Callback Chance ({score.recommendation})")
+            browser.close()
+
+        return {
+            "status": "scan_complete",
+            "job_title": session.job_title,
+            "company": session.company,
+            "description": session.description,
+            "initial_screenshot": session.initial_screenshot,
+            "score": session.score_result,
+        }
+    except Exception as e:
+        session.status = "error"
+        session.error_message = str(e)
+        dev_logger.log("ERROR", f"Failed during scan: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _run_autofill_worker():
+    """Background worker executing Playwright in non-headless mode."""
+    profile = storage.load_profile()
+    dev_logger.log("INFO", "Initializing non-headless Chromium window on user desktop...")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=HEADLESS,
+            slow_mo=SLOW_MO_MS,
+        )
+        context = browser.new_context(viewport=VIEWPORT, user_agent=USER_AGENT)
+        page = context.new_page()
+        page.set_default_timeout(BROWSER_TIMEOUT_MS)
+
+        try:
+            dev_logger.log("INFO", f"Worker navigating to {session.url}...")
+            page.goto(session.url, wait_until="domcontentloaded")
+            time.sleep(2)
+
+            extractor = FormExtractor(page)
+            dev_logger.log("INFO", "Detecting and opening application form...")
+            extractor.ensure_application_form_open()
+            fields = extractor.scan_form_fields()
+            dev_logger.log("SUCCESS", f"Identified {len(fields)} interactable field(s) on target form.")
+
+            # Define callbacks for GUI synchronization
+            def on_field_fill(label: str, status_str: str, val: str):
+                with session.lock:
+                    session.fill_steps.append({
+                        "field": label,
+                        "status": status_str,
+                        "value": val,
+                        "time": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+                    })
+                lvl = "SUCCESS" if status_str == "FILLED" else ("WARN" if status_str == "SKIPPED" else "ERROR")
+                dev_logger.log(lvl, f"Field '{label}' -> [{status_str}] {val[:40] if val else ''}")
+
+            def prompt_callback(field: ExtractedField) -> str:
+                dev_logger.log("WARN", f"Unmapped field: '{field.label}'. Requesting user input via modal...")
+                with session.lock:
+                    session.status = "waiting_for_input"
+                    session.pending_question = {
+                        "field_id": field.id,
+                        "label": field.label,
+                        "field_type": field.field_type,
+                        "options": field.options,
+                    }
+                    session.input_event.clear()
+
+                # Wait for user input from GUI (timeout 120s)
+                session.input_event.wait(timeout=120)
+                with session.lock:
+                    ans = session.user_answer or ""
+                    session.pending_question = None
+                    session.user_answer = None
+                    session.status = "filling"
+                dev_logger.log("INFO", f"Received user response for '{field.label}': '{ans}'. Auto-persisted to QA bank.")
+                return ans
+
+            def essay_callback(question: str, draft: str):
+                dev_logger.log("INFO", f"Open-ended essay question found: '{question[:50]}...'. Drafting response with local model...")
+                with session.lock:
+                    session.status = "waiting_for_essay"
+                    session.pending_essay = {
+                        "question": question,
+                        "draft": draft,
+                    }
+                    session.essay_event.clear()
+
+                # Wait for essay decision from GUI (timeout 180s)
+                session.essay_event.wait(timeout=180)
+                with session.lock:
+                    decision = session.essay_decision or {"choice": "accept", "text": draft}
+                    session.pending_essay = None
+                    session.essay_decision = None
+                    session.status = "filling"
+                dev_logger.log("SUCCESS", f"User selected essay action: '{decision.get('choice')}'")
+                return decision.get("choice", "accept"), decision.get("text", draft)
+
+            filler = FormFiller(
+                page=page,
+                storage=storage,
+                scorer=scorer,
+                user_profile=profile,
+                job_title=session.job_title,
+                company=session.company,
+                job_description=session.description,
+                on_field_fill=on_field_fill,
+                prompt_callback=prompt_callback,
+                essay_callback=essay_callback,
+            )
+
+            with session.lock:
+                session.status = "filling"
+
+            summary = filler.fill_all_fields(fields)
+            post_screenshot_path = extractor.capture_screenshot("post_fill")
+            dev_logger.log("SUCCESS", f"Autofill execution complete. Filled: {summary.fields_filled}, Skipped: {summary.fields_skipped}, Added to QA: {summary.questions_added_to_qa}")
+
+            with session.lock:
+                session.post_screenshot = f"/screenshots/{Path(post_screenshot_path).name}"
+                session.summary = {
+                    "filled": summary.fields_filled,
+                    "skipped": summary.fields_skipped,
+                    "added": summary.questions_added_to_qa,
+                }
+                session.status = "review_ready"
+                session.submit_event.clear()
+
+            dev_logger.log("WARN", "Safety Halt Reached! Form completed on screen. Awaiting user review confirmation.")
+
+            # Wait for final submission decision
+            session.submit_event.wait(timeout=300)
+
+            final_status = "REVIEWED_NOT_SUBMITTED"
+            if session.submit_decision is True:
+                dev_logger.log("INFO", "User confirmed submission. Locating submit button...")
+                submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Submit Application')").first
+                if submit_btn.count() > 0:
+                    submit_btn.click()
+                    time.sleep(3)
+                    final_status = "SUBMITTED"
+                    dev_logger.log("SUCCESS", "Final submit button clicked!")
+                else:
+                    final_status = "SUBMITTED_MANUALLY"
+                    dev_logger.log("WARN", "Submit button not found automatically. User submitted manually.")
+            else:
+                dev_logger.log("INFO", "User elected not to submit. Form left in current state.")
+
+            # Log to SQLite
+            app_id = f"app_{int(time.time())}"
+            chance = session.score_result.get("estimated_callback_chance", 50) if session.score_result else 50
+            critique = "\n".join(session.score_result.get("brutal_reality", [])) if session.score_result else ""
+
+            storage.log_application(
+                app_id=app_id,
+                job_title=session.job_title or "Job Application",
+                company=session.company or "Company",
+                url=session.url,
+                match_score=chance,
+                brutal_critique=critique,
+                status=final_status,
+                screenshot_path=post_screenshot_path,
+            )
+            dev_logger.log("INFO", f"Logged application record '{app_id}' to SQLite database.")
+
+            with session.lock:
+                session.status = "completed"
+
+        except Exception as e:
+            with session.lock:
+                session.status = "error"
+                session.error_message = str(e)
+            dev_logger.log("ERROR", f"Error in Playwright worker: {str(e)}")
+        finally:
+            browser.close()
+            dev_logger.log("INFO", "Playwright browser session closed.")
+
+
+@app.post("/api/autofill/start")
+def start_autofill(req: AutofillStartRequest):
+    """Starts the autofill worker in background thread."""
+    if session.status in ("filling", "waiting_for_input", "waiting_for_essay"):
+        return {"status": session.status, "message": "Autofill already in progress."}
+
+    if req.url:
+        session.url = req.url.strip()
+
+    session.thread = threading.Thread(target=_run_autofill_worker, daemon=True)
+    session.thread.start()
+    return {"status": "started", "url": session.url}
+
+
+@app.post("/api/autofill/answer")
+def answer_pending_question(req: AnswerRequest):
+    """Provides user answer to an unmapped form field prompt."""
+    if session.status != "waiting_for_input":
+        raise HTTPException(status_code=400, detail="Not currently waiting for input.")
+
+    session.user_answer = req.answer
+    session.input_event.set()
+    return {"status": "received", "answer": req.answer}
+
+
+@app.post("/api/autofill/essay")
+def answer_pending_essay(req: EssayDecisionRequest):
+    """Submits decision for an open-ended essay draft."""
+    if session.status != "waiting_for_essay":
+        raise HTTPException(status_code=400, detail="Not currently waiting for essay decision.")
+
+    session.essay_decision = {"choice": req.choice, "text": req.text or ""}
+    session.essay_event.set()
+    return {"status": "received", "decision": req.choice}
+
+
+@app.post("/api/autofill/submit")
+def final_submit_decision(req: FinalSubmitRequest):
+    """Confirms or skips final submission."""
+    if session.status != "review_ready":
+        raise HTTPException(status_code=400, detail="Not in review_ready status.")
+
+    session.submit_decision = req.submit
+    session.submit_event.set()
+    return {"status": "received", "submit": req.submit}
+
+
+@app.post("/api/autofill/abort")
+def abort_autofill():
+    """Aborts current session."""
+    with session.lock:
+        session.status = "aborted"
+        session.input_event.set()
+        session.essay_event.set()
+        session.submit_event.set()
+    return {"status": "aborted"}
+
+
+# --- Profile & QA & History Endpoints ---
+
+@app.get("/api/profile")
+def get_profile():
+    return storage.load_profile().model_dump()
+
+
+@app.post("/api/profile")
+def update_profile(profile_data: Dict[str, Any]):
+    profile = UserProfile(**profile_data)
+    storage.save_profile(profile)
+    return {"status": "success", "profile": profile.model_dump()}
+
+
+@app.post("/api/resume/upload")
+async def upload_resume(file: UploadFile = File(...)):
+    """Uploads resume file, saves to data/, and extracts structured candidate profile."""
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Empty file uploaded.")
+
+        saved_filename = storage.save_uploaded_resume(file_bytes, file.filename or "resume.pdf")
+        saved_path = storage.profile_path.parent / saved_filename
+
+        dev_logger.log("INFO", f"Uploaded resume '{saved_filename}' ({len(file_bytes)} bytes). Parsing text...")
+        parsed_data = resume_parser.parse_resume(saved_path)
+
+        dev_logger.log(
+            "SUCCESS",
+            f"Resume parsed! Extracted candidate '{parsed_data.get('personal', {}).get('full_name', 'Unknown')}' with {len(parsed_data.get('skills', []))} skills.",
+        )
+        return {
+            "status": "success",
+            "filename": saved_filename,
+            "profile": parsed_data,
+        }
+    except Exception as e:
+        dev_logger.log("ERROR", f"Failed to upload or parse resume: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/setup/status")
+def get_setup_status():
+    """Returns whether the first-time setup has been completed."""
+    profile = storage.load_profile()
+    return {
+        "is_setup_completed": profile.is_setup_completed,
+        "resume_file": profile.resume_file,
+        "candidate_name": profile.personal.full_name or "Candidate",
+    }
+
+
+@app.post("/api/setup/complete")
+def complete_setup(payload: Dict[str, Any]):
+    """Saves candidate profile and QA Knowledge Bank answers, marking setup as completed."""
+    try:
+        # Support both nested 'profile' and flat profile dict
+        profile_dict = payload.get("profile", payload)
+        if not isinstance(profile_dict, dict):
+            profile_dict = payload
+        profile_dict["is_setup_completed"] = True
+        profile = UserProfile(**profile_dict)
+        storage.save_profile(profile)
+
+        # Update QA Bank answers if supplied
+        qa_answers = payload.get("qa_answers", {})
+        if qa_answers and isinstance(qa_answers, dict):
+            storage.update_qa_answers(qa_answers)
+            dev_logger.log(
+                "INFO",
+                f"Updated {len(qa_answers)} screening answers in QA Knowledge Bank from setup wizard.",
+            )
+
+        # Add any custom QA entry if supplied
+        custom_qa = payload.get("custom_qa", [])
+        if isinstance(custom_qa, list):
+            for item in custom_qa:
+                if item.get("question") and item.get("answer"):
+                    storage.add_to_qa_bank(
+                        question=item["question"],
+                        answer=item["answer"],
+                        field_type=item.get("field_type", "text"),
+                        category=item.get("category", "custom"),
+                    )
+
+        dev_logger.log(
+            "SUCCESS",
+            f"First-time setup completed! Candidate: '{profile.personal.full_name}'. QA Knowledge Bank ready.",
+        )
+        return {
+            "status": "success",
+            "profile": profile.model_dump(),
+            "qa_bank": [e.model_dump() for e in storage.load_qa_bank()],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid setup data: {str(e)}")
+
+
+@app.post("/api/setup/reset")
+def reset_setup():
+    """Resets first-time setup state so the onboarding wizard can be re-run."""
+    storage.set_setup_completed(False)
+    dev_logger.log("INFO", "First-time setup state reset by user.")
+    return {"status": "reset", "is_setup_completed": False}
+
+
+@app.get("/api/qa")
+def get_qa_bank():
+    return [e.model_dump() for e in storage.load_qa_bank()]
+
+
+@app.post("/api/qa")
+def add_qa_entry(entry_data: Dict[str, Any]):
+    new_entry = storage.add_to_qa_bank(
+        question=entry_data.get("question", ""),
+        answer=entry_data.get("answer", ""),
+        field_type=entry_data.get("field_type", "text"),
+        category=entry_data.get("category", "custom"),
+    )
+    return {"status": "success", "entry": new_entry.model_dump()}
+
+
+@app.delete("/api/qa/{entry_id}")
+def delete_qa_entry(entry_id: str):
+    entries = storage.load_qa_bank()
+    filtered = [e for e in entries if e.id != entry_id]
+    storage.save_qa_bank(filtered)
+    return {"status": "deleted", "id": entry_id}
+
+
+@app.get("/api/history")
+def get_history(limit: int = 50):
+    return [l.model_dump() for l in storage.get_history(limit=limit)]
+
+
+# --- Developer Logs Endpoints ---
+
+@app.get("/api/logs")
+def get_developer_logs(since_id: int = 0):
+    """Returns developer logs, optionally filtered since a specific entry id."""
+    logs = dev_logger.get_logs(since_id=since_id)
+    return {"logs": logs, "total": len(dev_logger.entries)}
+
+
+@app.post("/api/logs/clear")
+def clear_developer_logs():
+    """Clears in-memory developer activity log buffer."""
+    dev_logger.clear()
+    dev_logger.log("INFO", "Developer log buffer reset.")
+    return {"status": "cleared"}
+
+
+# --- Mock ATS Server Controller ---
+
+@app.get("/api/mock-server/status")
+def mock_server_status():
+    global mock_server_instance
+    is_running = mock_server_instance is not None
+    return {"running": is_running, "url": "http://127.0.0.1:8088/"}
+
+
+@app.post("/api/mock-server/toggle")
+def toggle_mock_server():
+    global mock_server_instance, mock_server_thread
+    if mock_server_instance is None:
+        try:
+            mock_server_instance = HTTPServer(("127.0.0.1", 8088), MockATSHandler)
+            mock_server_thread = threading.Thread(
+                target=mock_server_instance.serve_forever, daemon=True
+            )
+            mock_server_thread.start()
+            return {"running": True, "url": "http://127.0.0.1:8088/"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed starting mock server: {e}")
+    else:
+        try:
+            mock_server_instance.shutdown()
+            mock_server_instance.server_close()
+            mock_server_instance = None
+            mock_server_thread = None
+            return {"running": False, "url": ""}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed stopping mock server: {e}")
+
+
+# --- Static Files Mounting ---
+
+# Ensure screenshots dir is mounted
+app.mount("/screenshots", StaticFiles(directory=str(SCREENSHOTS_DIR)), name="screenshots")
+
+# Static directory for GUI assets
+STATIC_DIR = ROOT_DIR / "src" / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

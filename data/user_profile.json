@@ -1,0 +1,62 @@
+{
+  "personal": {
+    "first_name": "Cole",
+    "last_name": "Determan",
+    "full_name": "Cole Determan",
+    "email": "coledeterman@gmail.com",
+    "phone": "(571) 480-2068",
+    "address": "",
+    "city": "Falls Church",
+    "state": "VA",
+    "postal_code": "",
+    "country": "United States"
+  },
+  "links": {
+    "linkedin": "linkedin.com/in/coledeterman",
+    "github": "",
+    "portfolio": "coledeterman.com"
+  },
+  "preferences": {
+    "desired_salary": "110,000",
+    "notice_period": "2 weeks"
+  },
+  "authorization": {
+    "us_work_authorized": "Yes",
+    "requires_sponsorship": "No",
+    "security_clearance": "None"
+  },
+  "eeoc": {},
+  "work_experience": [],
+  "education": [],
+  "skills": [
+    "Docker",
+    "AWS",
+    "JavaScript",
+    "ServiceNow",
+    "Swift",
+    "C",
+    "API integration",
+    "Firebase",
+    "Okta",
+    "Kafka",
+    "Css",
+    "Spring",
+    "Git",
+    "Java",
+    "Redis",
+    "Kubernetes",
+    "SQL",
+    "Agile/Scrum",
+    "Node.js",
+    "HTML/CSS",
+    "Software Design",
+    "Python",
+    "Html",
+    "Terraform (IAC)",
+    "Numpy",
+    "Linux"
+  ],
+  "certifications": [],
+  "resume_file": "9-8-2026-ColeDetermanResume.pdf",
+  "is_setup_completed": true
+}
