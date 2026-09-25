@@ -34,6 +34,7 @@ if sys.platform == "win32":
 from src.browser import (
     create_persistent_context,
     detect_authwall_or_login,
+    perform_automated_login,
 )
 from src.config import (
     BROWSER_PROFILE_DIR,
@@ -42,6 +43,8 @@ from src.config import (
     SLOW_MO_MS,
     USER_AGENT,
     VIEWPORT,
+    get_portal_credentials,
+    save_env_credentials,
 )
 from src.extractor import FormExtractor
 from src.filler import FormFiller
@@ -92,11 +95,50 @@ def run_apply_pipeline(url: str):
             # Check if redirected to login / authwall (e.g. LinkedIn)
             auth_check = detect_authwall_or_login(page)
             if auth_check["auth_required"]:
-                console.print(f"\n[bold yellow]🔐 Authentication Required ({auth_check['platform']}):[/bold yellow]")
-                console.print(f"[cyan]Please complete login in the open browser window to view this job posting.[/cyan]")
-                Prompt.ask("Press Enter once you have finished logging in")
-                page.goto(url, wait_until="domcontentloaded")
-                time.sleep(2)
+                platform = auth_check["platform"] or "LinkedIn"
+                console.print(f"\n[bold yellow]🔐 Authentication Required ({platform}):[/bold yellow]")
+                email, pwd = get_portal_credentials(platform)
+
+                if email and pwd:
+                    console.print(f"[cyan]Found credentials in .env for {platform} ({email}). Attempting automated login...[/cyan]")
+                    def pin_cb(msg: str) -> str:
+                        return Prompt.ask(f"[bold yellow]{msg}[/bold yellow]")
+                    success, msg = perform_automated_login(page, platform, email, pwd, pin_callback=pin_cb)
+                    if success:
+                        console.print(f"[bold green]✓ Automated login successful for {platform}![/bold green]")
+                        page.goto(url, wait_until="domcontentloaded")
+                        time.sleep(2)
+                    else:
+                        console.print(f"[bold red]Automated login failed: {msg}[/bold red]")
+                        console.print("[yellow]Please complete login manually in the open browser window.[/yellow]")
+                        Prompt.ask("Press Enter once you have finished logging in")
+                        page.goto(url, wait_until="domcontentloaded")
+                        time.sleep(2)
+                else:
+                    console.print(f"[yellow]No {platform.upper()}_EMAIL and {platform.upper()}_PASSWORD found in .env.[/yellow]")
+                    if Confirm.ask("Would you like to enter credentials to save to .env now?", default=True):
+                        entered_email = Prompt.ask(f"Enter {platform} Email")
+                        entered_pass = Prompt.ask(f"Enter {platform} Password", password=True)
+                        if entered_email and entered_pass:
+                            key_prefix = "LINKEDIN" if "link" in platform.lower() else "INDEED"
+                            save_env_credentials({
+                                f"{key_prefix}_EMAIL": entered_email.strip(),
+                                f"{key_prefix}_PASSWORD": entered_pass.strip(),
+                            })
+                            console.print("[green]Saved credentials to .env![/green]")
+                            def pin_cb(msg: str) -> str:
+                                return Prompt.ask(f"[bold yellow]{msg}[/bold yellow]")
+                            success, msg = perform_automated_login(page, platform, entered_email, entered_pass, pin_callback=pin_cb)
+                            if success:
+                                console.print(f"[bold green]✓ Automated login successful![/bold green]")
+                            else:
+                                console.print(f"[bold red]Login failed: {msg}. Please finish manually in browser.[/bold red]")
+                                Prompt.ask("Press Enter once logged in")
+                    else:
+                        console.print(f"[cyan]Please complete login in the open browser window to view this job posting.[/cyan]")
+                        Prompt.ask("Press Enter once you have finished logging in")
+                    page.goto(url, wait_until="domcontentloaded")
+                    time.sleep(2)
 
             extractor = FormExtractor(page)
             job_info = extractor.extract_job_info()
@@ -270,7 +312,9 @@ def login(
     platform: str = typer.Argument("linkedin", help="Platform to log into (e.g. linkedin, indeed, custom)"),
     url: Optional[str] = typer.Option(None, help="Custom login URL"),
 ):
-    """Opens a persistent browser session so you can log into LinkedIn, Indeed, etc."""
+    """Log into LinkedIn, Indeed, etc. and persist the authenticated browser session."""
+    display_banner()
+    email, pwd = get_portal_credentials(platform)
     target_url = url
     if not target_url:
         p_lower = platform.lower()
@@ -281,14 +325,50 @@ def login(
         else:
             target_url = "https://www.linkedin.com/login"
 
-    console.print(f"\n[bold cyan]>> Launching persistent browser for {platform}...[/bold cyan]")
+    console.print(f"\n[bold cyan]>> Launching browser for {platform}...[/bold cyan]")
     console.print(f"[dim]URL: {target_url}[/dim]")
     console.print(f"[dim]Session profile saved to: {BROWSER_PROFILE_DIR}[/dim]\n")
 
     with sync_playwright() as p:
         context = create_persistent_context(p, headless=False, slow_mo=0)
         page = context.pages[0] if context.pages else context.new_page()
-        page.goto(target_url)
+
+        if email and pwd:
+            console.print(f"[cyan]Found credentials in .env for {platform} ({email}). Attempting automated AI login...[/cyan]")
+            def pin_cb(msg: str) -> str:
+                return Prompt.ask(f"[bold yellow]{msg}[/bold yellow]")
+            success, msg = perform_automated_login(page, platform, email, pwd, pin_callback=pin_cb)
+            if success:
+                console.print(f"[bold green]✓ Automated login successful for {platform}![/bold green]")
+                console.print("[bold green][✓] Session saved! Your credentials and cookies are now remembered for all applications.[/bold green]\n")
+                context.close()
+                return
+            else:
+                console.print(f"[bold yellow]Automated login message: {msg}[/bold yellow]")
+                console.print("[yellow]Please finish logging in manually in the open browser window.[/yellow]")
+        else:
+            console.print(f"[yellow]No {platform.upper()}_EMAIL / {platform.upper()}_PASSWORD found in .env.[/yellow]")
+            if Confirm.ask("Would you like to enter credentials to save to .env now?", default=True):
+                entered_email = Prompt.ask(f"Enter {platform} Email")
+                entered_pass = Prompt.ask(f"Enter {platform} Password", password=True)
+                if entered_email and entered_pass:
+                    key_prefix = "LINKEDIN" if "link" in platform.lower() else "INDEED"
+                    save_env_credentials({
+                        f"{key_prefix}_EMAIL": entered_email.strip(),
+                        f"{key_prefix}_PASSWORD": entered_pass.strip(),
+                    })
+                    console.print("[green]Saved credentials to .env![/green]")
+                    def pin_cb(msg: str) -> str:
+                        return Prompt.ask(f"[bold yellow]{msg}[/bold yellow]")
+                    success, msg = perform_automated_login(page, platform, entered_email, entered_pass, pin_callback=pin_cb)
+                    if success:
+                        console.print(f"[bold green]✓ Automated login successful for {platform}![/bold green]")
+                        console.print("[bold green][✓] Session saved![/bold green]\n")
+                        context.close()
+                        return
+                    else:
+                        console.print(f"[yellow]{msg}[/yellow]")
+            page.goto(target_url)
 
         console.print("[bold green][+] Browser window is open on your screen.[/bold green]")
         console.print("[yellow]Please sign into your account, complete 2FA if prompted, and verify you are on your feed/dashboard.[/yellow]")

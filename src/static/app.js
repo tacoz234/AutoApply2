@@ -404,15 +404,27 @@ function initApplyFlow() {
         loadingCard.style.display = "none";
         btnScan.disabled = false;
 
-        if (data.status === "auth_required") {
+        if (data.status === "credentials_required" || data.status === "auth_required") {
           if (authBox) {
             authBox.style.display = "block";
+            const titleEl = document.getElementById("auth-req-title");
             const descEl = document.getElementById("auth-req-desc");
-            if (descEl) {
-              descEl.innerText = data.message || `${data.platform || "Platform"} requires authentication to view this posting.`;
+            const credsForm = document.getElementById("auth-req-creds-form");
+            const btnAuto = document.getElementById("btn-auth-req-auto");
+
+            if (titleEl) titleEl.innerText = `Sign-In Required for ${data.platform || "Portal"}`;
+            if (descEl) descEl.innerText = data.message || `${data.platform || "Platform"} requires authentication.`;
+
+            if (data.status === "credentials_required") {
+              if (credsForm) credsForm.style.display = "block";
+              if (btnAuto) btnAuto.style.display = "none";
+              showToast(`Enter ${data.platform || "job portal"} credentials below to auto-login via .env!`, "warning");
+            } else {
+              if (credsForm) credsForm.style.display = "none";
+              if (btnAuto && data.has_credentials) btnAuto.style.display = "inline-flex";
+              showToast(`Authentication needed on ${data.platform || "job portal"}!`, "warning");
             }
           }
-          showToast(`Authentication required on ${data.platform || "job portal"}! Click 'Open Browser & Log In'`, "warning");
           return;
         }
 
@@ -426,9 +438,54 @@ function initApplyFlow() {
       });
   });
 
+  // Inline .env Credentials Save & Auto-Login Trigger
+  const btnAuthSaveAndLogin = document.getElementById("btn-auth-save-and-login");
+  if (btnAuthSaveAndLogin) {
+    btnAuthSaveAndLogin.addEventListener("click", () => {
+      const email = document.getElementById("auth-inline-email").value.trim();
+      const pwd = document.getElementById("auth-inline-pwd").value.trim();
+      if (!email || !pwd) {
+        showToast("Please enter both email and password.", "warning");
+        return;
+      }
+      btnAuthSaveAndLogin.disabled = true;
+      btnAuthSaveAndLogin.innerText = "Saving to .env...";
+
+      fetch("/api/credentials/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          linkedin_email: email,
+          linkedin_password: pwd,
+        }),
+      })
+        .then((r) => r.json())
+        .then(() => {
+          showToast("Credentials saved to .env! Attempting automated AI login...", "success");
+          btnAuthSaveAndLogin.disabled = false;
+          btnAuthSaveAndLogin.innerText = "💾 Save to .env & Auto-Log In";
+          const credsForm = document.getElementById("auth-req-creds-form");
+          if (credsForm) credsForm.style.display = "none";
+          btnScan.click();
+        })
+        .catch((err) => {
+          btnAuthSaveAndLogin.disabled = false;
+          btnAuthSaveAndLogin.innerText = "💾 Save to .env & Auto-Log In";
+          showToast("Error saving credentials: " + err.message, "error");
+        });
+    });
+  }
+
   // Auth Required Card Actions
   const btnAuthReqLogin = document.getElementById("btn-auth-req-login");
   const btnAuthReqRetry = document.getElementById("btn-auth-req-retry");
+  const btnAuthReqAuto = document.getElementById("btn-auth-req-auto");
+
+  if (btnAuthReqAuto) {
+    btnAuthReqAuto.addEventListener("click", () => {
+      btnScan.click();
+    });
+  }
   if (btnAuthReqLogin) {
     btnAuthReqLogin.addEventListener("click", () => {
       openBrowserAuthModal();
@@ -541,6 +598,55 @@ function initApplyFlow() {
       stopStatusPolling();
     });
   });
+
+  // 2FA Verification PIN Handler
+  const btnSubmitPin = document.getElementById("btn-submit-pin");
+  const pinInput = document.getElementById("modal-pin-input");
+  if (btnSubmitPin) {
+    btnSubmitPin.addEventListener("click", () => {
+      const pinVal = pinInput ? pinInput.value.trim() : "";
+      if (!pinVal) {
+        showToast("Please enter the verification PIN", "warning");
+        return;
+      }
+      btnSubmitPin.disabled = true;
+      btnSubmitPin.innerText = "Submitting...";
+
+      fetch("/api/browser/submit-pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pinVal }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error("Failed to submit PIN");
+          return r.json();
+        })
+        .then(() => {
+          showToast("2FA PIN submitted to browser! Resuming...", "success");
+          btnSubmitPin.disabled = false;
+          btnSubmitPin.innerText = "Submit 2FA PIN 🚀";
+          const pinModal = document.getElementById("modal-pin");
+          if (pinModal) {
+            pinModal.style.display = "none";
+            pinModal.classList.add("hidden");
+          }
+          if (pinInput) pinInput.value = "";
+        })
+        .catch((err) => {
+          btnSubmitPin.disabled = false;
+          btnSubmitPin.innerText = "Submit 2FA PIN 🚀";
+          showToast("Error submitting PIN: " + err.message, "error");
+        });
+    });
+
+    if (pinInput) {
+      pinInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          btnSubmitPin.click();
+        }
+      });
+    }
+  }
 }
 
 function renderScorecard(data) {
@@ -710,6 +816,26 @@ function handleSessionUpdate(session) {
     document.getElementById("modal-essay-text").value = session.pending_essay.draft || "";
   } else if (session.status !== "waiting_for_essay") {
     essayModal.style.display = "none";
+  }
+
+  // Handle Waiting for 2FA Verification PIN
+  const pinModal = document.getElementById("modal-pin");
+  if (session.status === "waiting_for_pin") {
+    if (pinModal) {
+      pinModal.style.display = "flex";
+      pinModal.classList.remove("hidden");
+      if (session.pending_pin) {
+        const promptEl = document.getElementById("modal-pin-prompt");
+        if (promptEl) promptEl.innerText = session.pending_pin;
+      }
+      const pinInput = document.getElementById("modal-pin-input");
+      if (pinInput && document.activeElement !== pinInput) {
+        pinInput.focus();
+      }
+    }
+  } else if (pinModal && session.status !== "waiting_for_pin") {
+    pinModal.style.display = "none";
+    pinModal.classList.add("hidden");
   }
 
   // Handle Review Ready (Pre-Flight Review)
@@ -1376,6 +1502,31 @@ function initProfileResumeUpload() {
 // BROWSER LOGIN & PERSISTENT SESSION MANAGER
 // =========================================================================
 
+function loadCredentialsStatus() {
+  fetch("/api/credentials/status")
+    .then((r) => r.json())
+    .then((data) => {
+      const statusText = document.getElementById("env-creds-status-text");
+      const liEmail = document.getElementById("env-cred-linkedin-email");
+      const indEmail = document.getElementById("env-cred-indeed-email");
+
+      if (data.linkedin_email && liEmail && !liEmail.value) {
+        liEmail.value = data.linkedin_email;
+      }
+      if (data.indeed_email && indEmail && !indEmail.value) {
+        indEmail.value = data.indeed_email;
+      }
+
+      if (statusText) {
+        const liStatus = data.has_linkedin ? "LinkedIn: ✓ Saved" : "LinkedIn: ⚠ Not Set";
+        const indStatus = data.has_indeed ? "Indeed: ✓ Saved" : "Indeed: ⚠ Not Set";
+        statusText.innerText = `${liStatus} · ${indStatus}`;
+        statusText.style.color = (data.has_linkedin || data.has_indeed) ? "#16a34a" : "var(--text-muted)";
+      }
+    })
+    .catch(() => {});
+}
+
 function openBrowserAuthModal() {
   const modal = document.getElementById("modal-browser-login");
   if (modal) {
@@ -1383,6 +1534,7 @@ function openBrowserAuthModal() {
     modal.style.display = "flex";
   }
   checkBrowserAuthStatus();
+  loadCredentialsStatus();
 }
 
 function closeBrowserAuthModal() {
@@ -1423,6 +1575,77 @@ function initBrowserAuthManager() {
   if (modal) {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) closeBrowserAuthModal();
+    });
+  }
+
+  // Load credentials status initially
+  loadCredentialsStatus();
+
+  // Save Credentials to .env Button
+  const btnSaveEnvCreds = document.getElementById("btn-save-env-creds");
+  if (btnSaveEnvCreds) {
+    btnSaveEnvCreds.addEventListener("click", () => {
+      const liEmail = document.getElementById("env-cred-linkedin-email").value.trim();
+      const liPwd = document.getElementById("env-cred-linkedin-pwd").value.trim();
+      const indEmail = document.getElementById("env-cred-indeed-email").value.trim();
+      const indPwd = document.getElementById("env-cred-indeed-pwd").value.trim();
+
+      const payload = {};
+      if (liEmail) payload.linkedin_email = liEmail;
+      if (liPwd) payload.linkedin_password = liPwd;
+      if (indEmail) payload.indeed_email = indEmail;
+      if (indPwd) payload.indeed_password = indPwd;
+
+      if (Object.keys(payload).length === 0) {
+        showToast("Please enter at least an email or password to save", "warning");
+        return;
+      }
+
+      btnSaveEnvCreds.disabled = true;
+      btnSaveEnvCreds.innerText = "Saving...";
+
+      fetch("/api/credentials/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+        .then((r) => r.json())
+        .then((res) => {
+          btnSaveEnvCreds.disabled = false;
+          btnSaveEnvCreds.innerText = "💾 Save Credentials to .env";
+          showToast(`Saved to .env (${res.updated.join(", ")})!`, "success");
+          loadCredentialsStatus();
+        })
+        .catch((err) => {
+          btnSaveEnvCreds.disabled = false;
+          btnSaveEnvCreds.innerText = "💾 Save Credentials to .env";
+          showToast("Error saving credentials: " + err.message, "error");
+        });
+    });
+  }
+
+  // Test Auto-Login LinkedIn Button
+  const btnTestAutoLinkedin = document.getElementById("btn-test-auto-linkedin");
+  if (btnTestAutoLinkedin) {
+    btnTestAutoLinkedin.addEventListener("click", () => {
+      showToast("Launching browser with .env credentials for LinkedIn...", "info");
+      fetch("/api/browser/open-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: "https://www.linkedin.com/login",
+          platform: "LinkedIn",
+        }),
+      })
+        .then((r) => r.json())
+        .then(() => {
+          const activeBox = document.getElementById("active-browser-controls");
+          if (activeBox) activeBox.style.display = "flex";
+          showToast("Chromium opened! Logged-in session will persist automatically.", "success");
+        })
+        .catch((err) => {
+          showToast("Failed launching browser: " + err.message, "error");
+        });
     });
   }
 

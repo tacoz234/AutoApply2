@@ -55,6 +55,31 @@ class TestBrowserAuth(unittest.TestCase):
         self.assertIn("is_active", data)
         self.assertIn("profile_dir", data)
 
+    def test_credentials_api_save_and_status(self):
+        client = TestClient(app)
+        save_resp = client.post("/api/credentials/save", json={
+            "linkedin_email": "candidate@example.com",
+            "linkedin_password": "supersecretpassword123",
+        })
+        self.assertEqual(save_resp.status_code, 200)
+        save_data = save_resp.json()
+        self.assertEqual(save_data["status"], "saved")
+        self.assertIn("LINKEDIN_EMAIL", save_data["updated"])
+
+        status_resp = client.get("/api/credentials/status")
+        self.assertEqual(status_resp.status_code, 200)
+        status_data = status_resp.json()
+        self.assertTrue(status_data["has_linkedin"])
+        self.assertEqual(status_data["linkedin_email"], "candidate@example.com")
+
+    def test_perform_automated_login_unsupported_platform(self):
+        from src.browser import perform_automated_login
+        page_mock = MagicMock()
+        success, msg = perform_automated_login(page_mock, "unknown_platform", "test@test.com", "pass")
+        self.assertFalse(success)
+        self.assertIn("not currently implemented", msg)
+
 
 if __name__ == "__main__":
     unittest.main()
+

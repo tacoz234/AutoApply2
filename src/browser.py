@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import threading
 import time
-from typing import Any, Dict, Generator, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, Optional, Tuple
 from playwright.sync_api import sync_playwright, BrowserContext, Page, Playwright
 
 from src.config import (
@@ -246,3 +246,140 @@ class InteractiveBrowserSession:
 
 # Global interactive login session manager
 interactive_browser = InteractiveBrowserSession()
+
+
+def perform_automated_login(
+    page: Page,
+    platform: str,
+    email: str,
+    password: str,
+    pin_callback: Optional[Callable[[str], str]] = None,
+) -> Tuple[bool, str]:
+    """Automates form submission to log into supported job boards (LinkedIn, Indeed)."""
+    p_lower = platform.lower()
+    if "link" in p_lower:
+        return _login_linkedin(page, email, password, pin_callback)
+    elif "indeed" in p_lower:
+        return _login_indeed(page, email, password, pin_callback)
+    else:
+        return False, f"Automated login is not currently implemented for {platform}."
+
+
+def _login_linkedin(
+    page: Page,
+    email: str,
+    password: str,
+    pin_callback: Optional[Callable[[str], str]] = None,
+) -> Tuple[bool, str]:
+    """Executes automated AI login for LinkedIn and handles 2FA challenges."""
+    try:
+        if "login" not in page.url.lower():
+            page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
+            time.sleep(1.5)
+
+        # 1. Fill email / username
+        email_loc = page.locator("input#username, input[name='session_key'], input[type='email'], input#session_key").first
+        if email_loc.count() == 0:
+            return False, "Could not locate LinkedIn username/email input."
+
+        email_loc.scroll_into_view_if_needed()
+        email_loc.fill("")
+        email_loc.fill(email)
+        time.sleep(0.3)
+
+        # 2. Fill password
+        pwd_loc = page.locator("input#password, input[name='session_password'], input[type='password'], input#session_password").first
+        if pwd_loc.count() == 0:
+            return False, "Could not locate LinkedIn password input."
+
+        pwd_loc.scroll_into_view_if_needed()
+        pwd_loc.fill("")
+        pwd_loc.fill(password)
+        time.sleep(0.3)
+
+        # 3. Click submit
+        submit_btn = page.locator("button[type='submit'], button[data-litms-control-urn*='login'], button:has-text('Sign in')").first
+        if submit_btn.count() == 0:
+            return False, "Could not locate LinkedIn sign-in button."
+
+        submit_btn.click()
+        time.sleep(3.0)
+
+        # 4. Check for 2FA PIN verification
+        pin_input = page.locator("input#input__email_verification_pin, input#input__phone_verification_pin, input[name='pin'], input[name='verificationCode']").first
+        if pin_input.count() > 0 and pin_input.is_visible():
+            if pin_callback:
+                pin_code = pin_callback("LinkedIn sent a verification PIN to your email or phone.")
+                if pin_code and pin_code.strip():
+                    pin_input.fill(pin_code.strip())
+                    time.sleep(0.3)
+                    pin_submit = page.locator("button[type='submit'], button#email-pin-submit-button, button:has-text('Submit')").first
+                    if pin_submit.count() > 0:
+                        pin_submit.click()
+                        time.sleep(3.0)
+            else:
+                # Wait for candidate to enter code in browser window
+                for _ in range(30):
+                    time.sleep(2)
+                    if pin_input.count() == 0 or not pin_input.is_visible():
+                        break
+
+        # 5. Check if security challenge / captcha
+        if "checkpoint" in page.url.lower() or page.locator("iframe[src*='arkoselabs'], iframe[title*='challenge']").count() > 0:
+            for _ in range(30):
+                time.sleep(2)
+                if "checkpoint" not in page.url.lower():
+                    break
+
+        # 6. Verify successful login
+        curr_url = page.url.lower()
+        if "login" not in curr_url and "authwall" not in curr_url:
+            return True, "Successfully logged into LinkedIn."
+
+        # Check for error message
+        err_msg = page.locator("#error-for-username, #error-for-password, .alert-content, .error__message").first
+        if err_msg.count() > 0 and err_msg.is_visible():
+            return False, f"LinkedIn login error: {err_msg.inner_text().strip()}"
+
+        return False, "LinkedIn did not redirect to feed. Please verify your credentials."
+    except Exception as e:
+        return False, f"Exception during LinkedIn automated login: {str(e)}"
+
+
+def _login_indeed(
+    page: Page,
+    email: str,
+    password: str,
+    pin_callback: Optional[Callable[[str], str]] = None,
+) -> Tuple[bool, str]:
+    """Executes automated AI login for Indeed."""
+    try:
+        if "login" not in page.url.lower():
+            page.goto("https://secure.indeed.com/account/login", wait_until="domcontentloaded")
+            time.sleep(1.5)
+
+        email_loc = page.locator("input#ifl-InputFormField-3, input[type='email'], input#email").first
+        if email_loc.count() > 0:
+            email_loc.fill(email)
+            time.sleep(0.3)
+            next_btn = page.locator("button[type='submit'], button:has-text('Continue')").first
+            if next_btn.count() > 0:
+                next_btn.click()
+                time.sleep(2.0)
+
+        pwd_loc = page.locator("input[type='password'], input#password").first
+        if pwd_loc.count() > 0:
+            pwd_loc.fill(password)
+            time.sleep(0.3)
+            submit_btn = page.locator("button[type='submit'], button:has-text('Sign in')").first
+            if submit_btn.count() > 0:
+                submit_btn.click()
+                time.sleep(2.5)
+
+        curr_url = page.url.lower()
+        if "login" not in curr_url:
+            return True, "Successfully logged into Indeed."
+        return False, "Indeed login did not redirect. Check credentials."
+    except Exception as e:
+        return False, f"Exception during Indeed login: {str(e)}"
+

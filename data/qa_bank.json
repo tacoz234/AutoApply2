@@ -50,7 +50,7 @@
       "earliest start date",
       "when are you available to start"
     ],
-    "answer": "2 weeks",
+    "answer": "3 weeks",
     "field_type": "text",
     "created_at": "2026-09-01T10:00:00Z"
   },
@@ -151,5 +151,27 @@
     "answer": "Yes",
     "field_type": "text",
     "created_at": "2026-09-22T01:44:12.927455+00:00"
+  },
+  {
+    "id": "are_you_21_or_older_1790369371",
+    "category": "legal",
+    "question_patterns": [
+      "are you 21 or older?",
+      "are you 21 or older"
+    ],
+    "answer": "Yes",
+    "field_type": "text",
+    "created_at": "2026-09-25T20:49:31.557849+00:00"
+  },
+  {
+    "id": "are_you_21_or_older_1790369572",
+    "category": "legal",
+    "question_patterns": [
+      "are you 21 or older?",
+      "are you 21 or older"
+    ],
+    "answer": "Yes",
+    "field_type": "text",
+    "created_at": "2026-09-25T20:52:52.524399+00:00"
   }
 ]

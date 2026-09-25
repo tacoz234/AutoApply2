@@ -41,3 +41,58 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
+
+# Automated Portal Credentials (from .env)
+ENV_FILE_PATH = ROOT_DIR / ".env"
+try:
+    from dotenv import load_dotenv
+    if ENV_FILE_PATH.exists():
+        load_dotenv(ENV_FILE_PATH, override=True)
+except Exception:
+    pass
+
+LINKEDIN_EMAIL = os.getenv("LINKEDIN_EMAIL", "").strip()
+LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD", "").strip()
+INDEED_EMAIL = os.getenv("INDEED_EMAIL", "").strip()
+INDEED_PASSWORD = os.getenv("INDEED_PASSWORD", "").strip()
+
+
+def get_portal_credentials(platform: str = "linkedin") -> tuple[str, str]:
+    """Retrieves stored email & password for a job platform."""
+    p_lower = platform.lower()
+    if "link" in p_lower:
+        email = os.getenv("LINKEDIN_EMAIL", "").strip()
+        pwd = os.getenv("LINKEDIN_PASSWORD", "").strip()
+    elif "indeed" in p_lower:
+        email = os.getenv("INDEED_EMAIL", "").strip()
+        pwd = os.getenv("INDEED_PASSWORD", "").strip()
+    else:
+        email = ""
+        pwd = ""
+    return email, pwd
+
+
+def save_env_credentials(updates: dict[str, str]) -> None:
+    """Updates key-value pairs in the root .env file and updates os.environ in memory."""
+    lines = []
+    existing_keys = set()
+    if ENV_FILE_PATH.exists():
+        with open(ENV_FILE_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    key = stripped.split("=", 1)[0].strip()
+                    if key in updates:
+                        lines.append(f"{key}={updates[key]}\n")
+                        existing_keys.add(key)
+                        continue
+                lines.append(line)
+
+    for k, v in updates.items():
+        if k not in existing_keys:
+            lines.append(f"{k}={v}\n")
+        os.environ[k] = v
+
+    with open(ENV_FILE_PATH, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+

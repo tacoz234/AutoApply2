@@ -21,10 +21,12 @@ from src.browser import (
     create_persistent_context,
     detect_authwall_or_login,
     interactive_browser,
+    perform_automated_login,
 )
 from src.resume_parser import ResumeParser
 
 from src.config import (
+    BROWSER_PROFILE_DIR,
     BROWSER_TIMEOUT_MS,
     DATA_DIR,
     HEADLESS,
@@ -33,6 +35,8 @@ from src.config import (
     SLOW_MO_MS,
     USER_AGENT,
     VIEWPORT,
+    get_portal_credentials,
+    save_env_credentials,
 )
 from src.extractor import ExtractedField, FormExtractor
 from src.filler import FillSummary, FormFiller
@@ -59,7 +63,7 @@ class AutofillSession:
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.status = "idle"  # idle, scanning, scan_complete, filling, waiting_for_input, waiting_for_essay, review_ready, completed, aborted, error
+        self.status = "idle"  # idle, scanning, scan_complete, filling, waiting_for_input, waiting_for_essay, waiting_for_pin, review_ready, completed, aborted, error
         self.url = ""
         self.job_title = ""
         self.company = ""
@@ -79,6 +83,10 @@ class AutofillSession:
         self.essay_event = threading.Event()
         self.pending_essay: Optional[Dict[str, Any]] = None
         self.essay_decision: Optional[Dict[str, str]] = None
+
+        self.pin_event = threading.Event()
+        self.pending_pin: Optional[str] = None
+        self.user_pin: Optional[str] = None
 
         self.submit_event = threading.Event()
         self.submit_decision: Optional[bool] = None
@@ -103,9 +111,12 @@ class AutofillSession:
             self.user_answer = None
             self.pending_essay = None
             self.essay_decision = None
+            self.pending_pin = None
+            self.user_pin = None
             self.submit_decision = None
             self.input_event.clear()
             self.essay_event.clear()
+            self.pin_event.clear()
             self.submit_event.clear()
 
 
@@ -181,6 +192,17 @@ class FinalSubmitRequest(BaseModel):
     submit: bool
 
 
+class PinSubmitRequest(BaseModel):
+    pin: str
+
+
+class CredentialsSaveRequest(BaseModel):
+    linkedin_email: Optional[str] = None
+    linkedin_password: Optional[str] = None
+    indeed_email: Optional[str] = None
+    indeed_password: Optional[str] = None
+
+
 # --- API Routes ---
 
 @app.get("/api/status")
@@ -200,8 +222,52 @@ def get_status():
             "summary": session.summary,
             "pending_question": session.pending_question,
             "pending_essay": session.pending_essay,
+            "pending_pin": session.pending_pin,
             "error_message": session.error_message,
         }
+
+
+@app.get("/api/credentials/status")
+def get_credentials_status():
+    """Returns whether job board credentials are configured in .env."""
+    li_email, li_pwd = get_portal_credentials("linkedin")
+    ind_email, ind_pwd = get_portal_credentials("indeed")
+    return {
+        "has_linkedin": bool(li_email and li_pwd),
+        "linkedin_email": li_email,
+        "has_indeed": bool(ind_email and ind_pwd),
+        "indeed_email": ind_email,
+    }
+
+
+@app.post("/api/credentials/save")
+def save_credentials_route(req: CredentialsSaveRequest):
+    """Saves candidate credentials to root .env file for automated AI login."""
+    updates = {}
+    if req.linkedin_email is not None:
+        updates["LINKEDIN_EMAIL"] = req.linkedin_email.strip()
+    if req.linkedin_password is not None:
+        updates["LINKEDIN_PASSWORD"] = req.linkedin_password.strip()
+    if req.indeed_email is not None:
+        updates["INDEED_EMAIL"] = req.indeed_email.strip()
+    if req.indeed_password is not None:
+        updates["INDEED_PASSWORD"] = req.indeed_password.strip()
+
+    if updates:
+        save_env_credentials(updates)
+        dev_logger.log("SUCCESS", f"Saved portal credentials to .env ({', '.join(updates.keys())}).")
+    return {"status": "saved", "updated": list(updates.keys())}
+
+
+@app.post("/api/browser/submit-pin")
+def submit_pin_route(req: PinSubmitRequest):
+    """Submits 2FA PIN provided by user from the GUI."""
+    if session.status != "waiting_for_pin":
+        raise HTTPException(status_code=400, detail="Not currently waiting for PIN.")
+    session.user_pin = req.pin
+    session.pin_event.set()
+    dev_logger.log("INFO", "Received 2FA verification PIN from candidate. Submitting to form...")
+    return {"status": "received"}
 
 
 @app.post("/api/browser/open-login")
@@ -266,18 +332,80 @@ def scan_job_url(req: ScanRequest):
             # Check for authwall / sign-in requirement
             auth_check = detect_authwall_or_login(page)
             if auth_check["auth_required"]:
-                dev_logger.log("WARN", f"Authentication required on {auth_check['platform']} to view {session.url}.")
-                context.close()
-                with session.lock:
-                    session.status = "auth_required"
-                    session.error_message = f"Sign-in required on {auth_check['platform']} to view this posting."
-                return {
-                    "status": "auth_required",
-                    "platform": auth_check["platform"],
-                    "url": session.url,
-                    "reason": auth_check["reason"],
-                    "message": f"Sign-in required on {auth_check['platform']}. Please log into your account using the Browser Sessions window, then click Retry Scan.",
-                }
+                platform = auth_check["platform"] or "LinkedIn"
+                email, pwd = get_portal_credentials(platform)
+
+                if email and pwd:
+                    dev_logger.log("INFO", f"Credentials found in .env for {platform} ({email}). Attempting automated AI login...")
+
+                    def scan_pin_callback(msg: str) -> str:
+                        dev_logger.log("WARN", f"2FA PIN requested by {platform}: '{msg}'")
+                        with session.lock:
+                            session.status = "waiting_for_pin"
+                            session.pending_pin = msg
+                            session.pin_event.clear()
+                        session.pin_event.wait(timeout=120)
+                        with session.lock:
+                            ans = session.user_pin or ""
+                            session.pending_pin = None
+                            session.user_pin = None
+                            session.status = "scanning"
+                        return ans
+
+                    login_success, login_msg = perform_automated_login(
+                        page=page,
+                        platform=platform,
+                        email=email,
+                        password=pwd,
+                        pin_callback=scan_pin_callback,
+                    )
+
+                    if login_success:
+                        dev_logger.log("SUCCESS", f"Automated login to {platform} succeeded! Navigating to job posting...")
+                        page.goto(session.url, wait_until="domcontentloaded")
+                        time.sleep(2.5)
+                        re_auth = detect_authwall_or_login(page)
+                        if re_auth["auth_required"]:
+                            context.close()
+                            with session.lock:
+                                session.status = "auth_required"
+                                session.error_message = f"Still on authwall after login: {re_auth['reason']}"
+                            return {
+                                "status": "auth_required",
+                                "platform": platform,
+                                "url": session.url,
+                                "reason": re_auth["reason"],
+                                "has_credentials": True,
+                                "message": f"Login attempted but security checkpoint is active. Please complete challenge in browser.",
+                            }
+                    else:
+                        dev_logger.log("ERROR", f"Automated login to {platform} failed: {login_msg}")
+                        context.close()
+                        with session.lock:
+                            session.status = "auth_required"
+                            session.error_message = f"Automated login failed: {login_msg}"
+                        return {
+                            "status": "auth_required",
+                            "platform": platform,
+                            "url": session.url,
+                            "reason": login_msg,
+                            "has_credentials": True,
+                            "message": f"Automated login failed: {login_msg}",
+                        }
+                else:
+                    dev_logger.log("WARN", f"Authentication required on {platform}, but no credentials configured in .env.")
+                    context.close()
+                    with session.lock:
+                        session.status = "credentials_required"
+                        session.error_message = f"Sign-in required for {platform}. Save your credentials in .env to enable automated AI login."
+                    return {
+                        "status": "credentials_required",
+                        "platform": platform,
+                        "url": session.url,
+                        "reason": auth_check["reason"],
+                        "has_credentials": False,
+                        "message": f"{platform} requires authentication. Enter your email & password to enable automated AI login!",
+                    }
 
             dev_logger.log("INFO", "Inspecting page layout and extracting job metadata...")
             extractor = FormExtractor(page)
@@ -350,13 +478,44 @@ def _run_autofill_worker():
             # Check if redirected to login / authwall
             auth_check = detect_authwall_or_login(page)
             if auth_check["auth_required"]:
-                dev_logger.log("WARN", f"Sign-in required on {auth_check['platform']}! Please log in to your account in the open browser window...")
-                for _ in range(60):
-                    time.sleep(2)
-                    if not detect_authwall_or_login(page)["auth_required"]:
-                        dev_logger.log("SUCCESS", f"Successfully authenticated on {auth_check['platform']}! Resuming autofill...")
-                        time.sleep(1)
-                        break
+                platform = auth_check["platform"] or "LinkedIn"
+                email, pwd = get_portal_credentials(platform)
+
+                if email and pwd:
+                    dev_logger.log("INFO", f"Credentials found in .env for {platform} ({email}). Executing automated AI login...")
+                    def fill_pin_callback(msg: str) -> str:
+                        dev_logger.log("WARN", f"2FA PIN requested by {platform}: '{msg}'")
+                        with session.lock:
+                            session.status = "waiting_for_pin"
+                            session.pending_pin = msg
+                            session.pin_event.clear()
+                        session.pin_event.wait(timeout=120)
+                        with session.lock:
+                            ans = session.user_pin or ""
+                            session.pending_pin = None
+                            session.user_pin = None
+                            session.status = "filling"
+                        return ans
+
+                    login_success, login_msg = perform_automated_login(
+                        page=page,
+                        platform=platform,
+                        email=email,
+                        password=pwd,
+                        pin_callback=fill_pin_callback,
+                    )
+                    if login_success:
+                        dev_logger.log("SUCCESS", f"Automated login to {platform} succeeded! Reloading target form...")
+                        page.goto(session.url, wait_until="domcontentloaded")
+                        time.sleep(2.5)
+                else:
+                    dev_logger.log("WARN", f"Sign-in required on {platform}! Please log in to your account in the open browser window...")
+                    for _ in range(60):
+                        time.sleep(2)
+                        if not detect_authwall_or_login(page)["auth_required"]:
+                            dev_logger.log("SUCCESS", f"Successfully authenticated on {platform}! Resuming autofill...")
+                            time.sleep(1)
+                            break
 
             extractor = FormExtractor(page)
             dev_logger.log("INFO", "Detecting and opening application form / Easy Apply...")

@@ -111,16 +111,37 @@
           <div class="auth-req-header">
             <span class="auth-req-icon">🔐</span>
             <div>
-              <h3 class="auth-req-title">Sign-In Required to View Job</h3>
+              <h3 id="auth-req-title" class="auth-req-title">Sign-In Required to View Job</h3>
               <p id="auth-req-desc" class="auth-req-desc">LinkedIn requires candidate authentication before showing full job descriptions and Easy Apply forms.</p>
             </div>
           </div>
-          <div class="auth-req-actions">
-            <button id="btn-auth-req-login" class="btn btn-primary">
-              🚀 Open Browser & Log In
+
+          <!-- Inline Quick .env Credentials Setup -->
+          <div id="auth-req-creds-form" class="inline-cred-form" style="display: none;">
+            <p style="font-size: 13px; font-weight: 700; margin: 0; color: var(--ink);">
+              ⚡ Auto-Login with Local .env: Enter your account login below to save to <code style="background: #eee; padding: 2px 5px;">.env</code> and let ApplyFlow log in automatically.
+            </p>
+            <div class="inline-cred-row">
+              <input type="email" id="auth-inline-email" class="form-control" placeholder="Email / Username" />
+              <input type="password" id="auth-inline-pwd" class="form-control" placeholder="Password" />
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button id="btn-auth-save-and-login" class="btn btn-primary">
+                💾 Save to .env & Auto-Log In
+              </button>
+              <span style="font-size: 12px; color: var(--ink-secondary);">Credentials remain 100% local on your machine.</span>
+            </div>
+          </div>
+
+          <div class="auth-req-actions" style="margin-top: 14px;">
+            <button id="btn-auth-req-auto" class="btn btn-primary" style="display: none;">
+              ⚡ Auto-Log In with .env
+            </button>
+            <button id="btn-auth-req-login" class="btn btn-secondary">
+              🚀 Open Visible Browser
             </button>
             <button id="btn-auth-req-retry" class="btn btn-secondary">
-              🔄 I'm Logged In — Retry Scan
+              🔄 Retry Scan
             </button>
           </div>
         </div>
@@ -975,6 +996,63 @@
           </div>
         </div>
 
+        <!-- Automated AI Login Credentials (.env) Section -->
+        <div class="credentials-box">
+          <div class="credentials-header">
+            <h4 class="credentials-title">
+              <span>🤖</span> Automated AI Login Credentials (.env)
+            </h4>
+            <span class="badge badge-black">STORED IN LOCAL .ENV</span>
+          </div>
+          <p class="subtle-label" style="margin-bottom: 12px;">
+            Save your login credentials once in your local <code>.env</code>. When you provide a job link from LinkedIn or Indeed, ApplyFlow will automatically fill and authenticate in the background!
+          </p>
+
+          <!-- LinkedIn Credential Row -->
+          <div class="portal-credential-row">
+            <div class="portal-badge-label">
+              <span class="portal-mini-icon linkedin-bg">in</span>
+              <span>LinkedIn</span>
+            </div>
+            <div class="cred-field-col">
+              <label>Account Email</label>
+              <input type="email" id="env-cred-linkedin-email" class="form-control" placeholder="name@email.com" />
+            </div>
+            <div class="cred-field-col">
+              <label>Password</label>
+              <input type="password" id="env-cred-linkedin-pwd" class="form-control" placeholder="••••••••••••" />
+            </div>
+          </div>
+
+          <!-- Indeed Credential Row -->
+          <div class="portal-credential-row">
+            <div class="portal-badge-label">
+              <span class="portal-mini-icon indeed-bg">ind</span>
+              <span>Indeed</span>
+            </div>
+            <div class="cred-field-col">
+              <label>Account Email</label>
+              <input type="email" id="env-cred-indeed-email" class="form-control" placeholder="name@email.com" />
+            </div>
+            <div class="cred-field-col">
+              <label>Password</label>
+              <input type="password" id="env-cred-indeed-pwd" class="form-control" placeholder="••••••••••••" />
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px;">
+            <div style="display: flex; gap: 8px;">
+              <button id="btn-save-env-creds" class="btn btn-primary">
+                💾 Save Credentials to .env
+              </button>
+              <button id="btn-test-auto-linkedin" class="btn btn-secondary" title="Test automated AI login on LinkedIn">
+                ⚡ Auto-Login LinkedIn Now
+              </button>
+            </div>
+            <span id="env-creds-status-text" style="font-size: 12px; font-weight: 700; color: var(--text-muted);">Checking .env...</span>
+          </div>
+        </div>
+
         <!-- Active Session Controller Bar -->
         <div id="active-browser-controls" class="active-browser-box" style="display: none;">
           <div class="active-browser-status">
@@ -982,6 +1060,29 @@
             <span><strong>Browser Window Active:</strong> Complete sign-in & any verification in the open window, then click Done below.</span>
           </div>
           <button id="btn-finish-login" class="btn btn-success">✅ Done / Save Session</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2FA VERIFICATION PIN MODAL -->
+  <div id="modal-pin" class="modal-overlay hidden" style="display: none;">
+    <div class="modal-card modal-pin-card">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <span class="modal-badge badge-warning">2FA VERIFICATION</span>
+          <h3 class="modal-title">🔐 Verification PIN Required</h3>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p id="modal-pin-prompt" class="modal-lead" style="margin-bottom: 8px; font-size: 14px;">
+          LinkedIn/Indeed sent a verification PIN code to your email or phone. Enter it below to allow ApplyFlow to finish logging in.
+        </p>
+        <input type="text" id="modal-pin-input" class="pin-input" placeholder="000000" maxlength="8" autofocus />
+        <div style="display: flex; gap: 10px; justify-content: center; margin-top: 14px;">
+          <button id="btn-submit-pin" class="btn btn-primary btn-lg" style="min-width: 180px;">
+            Submit 2FA PIN 🚀
+          </button>
         </div>
       </div>
     </div>

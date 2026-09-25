@@ -1,23 +1,23 @@
 {
   "personal": {
-    "first_name": "Cole",
-    "last_name": "Determan",
-    "full_name": "Cole Determan",
-    "email": "coledeterman@gmail.com",
-    "phone": "(571) 480-2068",
+    "first_name": "ALEX",
+    "last_name": "CHEN",
+    "full_name": "ALEX CHEN",
+    "email": "alex.chen.dev@example.com",
+    "phone": "555-234-5678",
     "address": "",
-    "city": "Falls Church",
-    "state": "VA",
+    "city": "",
+    "state": "",
     "postal_code": "",
     "country": "United States"
   },
   "links": {
-    "linkedin": "linkedin.com/in/coledeterman",
+    "linkedin": "",
     "github": "",
-    "portfolio": "coledeterman.com"
+    "portfolio": "https://chen.dev"
   },
   "preferences": {
-    "desired_salary": "110,000",
+    "desired_salary": "150,000",
     "notice_period": "2 weeks"
   },
   "authorization": {
@@ -29,34 +29,10 @@
   "work_experience": [],
   "education": [],
   "skills": [
-    "Docker",
-    "AWS",
-    "JavaScript",
-    "ServiceNow",
-    "Swift",
-    "C",
-    "API integration",
-    "Firebase",
-    "Okta",
-    "Kafka",
-    "Css",
-    "Spring",
-    "Git",
-    "Java",
-    "Redis",
-    "Kubernetes",
-    "SQL",
-    "Agile/Scrum",
-    "Node.js",
-    "HTML/CSS",
-    "Software Design",
-    "Python",
-    "Html",
-    "Terraform (IAC)",
-    "Numpy",
-    "Linux"
+    "Distributed Systems",
+    "Python"
   ],
   "certifications": [],
-  "resume_file": "9-8-2026-ColeDetermanResume.pdf",
-  "is_setup_completed": true
+  "resume_file": "sample_resume.pdf",
+  "is_setup_completed": false
 }

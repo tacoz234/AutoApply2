@@ -106,18 +106,31 @@ This starts the local dashboard at `http://127.0.0.1:5000/` and opens your defau
 
 ## LinkedIn & External Portal Authentication
 
-Many job boards (especially **LinkedIn**) require authentication before revealing full job descriptions or allowing Easy Apply submissions. ApplyFlow uses anti-detection persistent browser contexts:
+Many job boards (especially **LinkedIn** and **Indeed**) require authentication before revealing full job descriptions or allowing Easy Apply submissions. ApplyFlow supports **Automated AI Login via `.env`** as well as interactive browser sessions:
 
-### 1. In the Web Dashboard:
-- Click **"🔐 Browser Sessions"** in the sidebar (or the **"🔐 Login"** button beside the URL input).
-- Click **"🚀 Open LinkedIn Login"**. A visible browser window will open on your screen.
-- Log in, complete any 2FA/SMS verification, and make sure your feed loads.
-- Click **"✅ Done / Save Session"**.
-- Your login state is saved permanently in `data/browser_profile/`. From then on, any LinkedIn job link you paste will load in your authenticated session!
-- If you scan a link that requires login before you've authenticated, ApplyFlow automatically detects the authwall and displays a sign-in prompt with 1-click retry.
+### Option A: Automated AI Sign-In via `.env` (Recommended)
+You do not need to manually log in on the official site every time. Simply add your credentials to `.env` (or enter them directly in the Web Dashboard / CLI prompt):
+```env
+# In .env (ignored by git, kept 100% local)
+LINKEDIN_EMAIL=your_linkedin_email@example.com
+LINKEDIN_PASSWORD=your_linkedin_password
+INDEED_EMAIL=your_indeed_email@example.com
+INDEED_PASSWORD=your_indeed_password
+```
+- **Automatic Recognition**: When ApplyFlow navigates to a LinkedIn or Indeed posting and detects an authwall or login page, it automatically inputs your credentials, clicks submit, and completes the login in the background.
+- **2FA / PIN Support**: If LinkedIn or Indeed requires a 2FA email or SMS PIN, a popup appears in the Web Dashboard (or a terminal prompt in the CLI). Enter the code and ApplyFlow finishes the login and resumes your application.
+- **Permanent Cookies**: Authentication cookies are saved in `data/browser_profile/` so subsequent applications proceed instantly.
 
-### 2. In the CLI:
-To sign into your accounts from the terminal:
+### Option B: Interactive Visible Browser
+If you prefer not to store credentials in `.env`:
+1. In the Web Dashboard:
+   - Click **"🔐 Browser Sessions"** in the sidebar.
+   - Click **"🚀 Open LinkedIn Login"**. A visible browser window opens on your screen.
+   - Log in manually, then click **"✅ Done / Save Session"**.
+2. In the CLI:
+   ```bash
+   python -m src.main login linkedin
+   ```
 ```bash
 python -m src.main login linkedin
 # Or for Indeed:

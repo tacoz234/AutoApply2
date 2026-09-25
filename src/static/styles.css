@@ -1903,3 +1903,116 @@ body {
   width: 100%;
 }
 
+/* Credentials Management Section */
+.credentials-box {
+  background: #faf8f2;
+  border: 2.5px solid var(--ink);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  margin-top: 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.credentials-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.credentials-title {
+  font-size: 15px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.portal-credential-row {
+  display: grid;
+  grid-template-columns: 130px 1.2fr 1.2fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  box-shadow: 2px 2px 0px rgba(18, 18, 18, 0.1);
+}
+
+.portal-badge-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.portal-mini-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.cred-field-col label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  margin-bottom: 4px;
+}
+
+.cred-field-col input {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+/* 2FA PIN Modal */
+.modal-pin-card {
+  max-width: 460px;
+  text-align: center;
+}
+
+.pin-input {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  letter-spacing: 6px;
+  text-align: center;
+  padding: 12px;
+  margin: 16px 0;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  box-shadow: inset 2px 2px 0px rgba(0, 0, 0, 0.1);
+}
+
+.inline-cred-form {
+  background: #ffffff;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 3px 3px 0px rgba(18, 18, 18, 0.15);
+}
+
+.inline-cred-row {
+  display: flex;
+  gap: 12px;
+}
+
+.inline-cred-row .form-control {
+  flex: 1;
+}
+
