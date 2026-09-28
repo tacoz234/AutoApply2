@@ -5,10 +5,12 @@ and synthesizes structured candidate profiles using local Ollama inference
 paired with a deterministic regex and heuristic extraction safety net.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import fitz  # PyMuPDF
 import requests
 

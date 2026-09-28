@@ -24,6 +24,7 @@ class ExtractedJobInfo(BaseModel):
     requirements_text: str = ""
     key_skills: List[str] = Field(default_factory=list)
     screenshot_path: Optional[str] = None
+    screenshot_paths: List[str] = Field(default_factory=list)
 
 
 class ExtractedField(BaseModel):
@@ -111,6 +112,12 @@ class FormExtractor:
                     }
                 });
 
+                // Expand max-height constraints on job description containers
+                document.querySelectorAll('.jobs-description, .jobs-description__content, .jobs-box__html-content, [class*="description"]').forEach(el => {
+                    el.style.maxHeight = 'none';
+                    el.style.overflow = 'visible';
+                });
+
                 // Scroll to top
                 window.scrollTo(0, 0);
             }""")
@@ -118,26 +125,97 @@ class FormExtractor:
         except Exception:
             pass
 
-    def capture_screenshot(self, name_prefix: str = "screen") -> str:
-        """Captures a clean, unobstructed screenshot for visual review and vision LLM analysis."""
-        timestamp = int(time.time())
-        filename = f"{name_prefix}_{timestamp}.png"
-        filepath = SCREENSHOTS_DIR / filename
-        
+    def capture_screenshots(self, name_prefix: str = "screen", max_slices: int = 8) -> List[str]:
+        """
+        Captures sequential viewport screenshots down the page so the entire page context
+        and all job descriptions/requirements are thoroughly captured without missing information.
+        """
         self.clean_page_for_capture()
+        captured_paths: List[str] = []
+        timestamp = int(time.time())
 
         try:
-            self.page.screenshot(path=str(filepath), full_page=True)
+            # Check page height and viewport height
+            dimensions = self.page.evaluate("""() => {
+                const body = document.body;
+                const html = document.documentElement;
+                const totalHeight = Math.max(
+                    body ? body.scrollHeight : 0,
+                    body ? body.offsetHeight : 0,
+                    html ? html.clientHeight : 0,
+                    html ? html.scrollHeight : 0,
+                    html ? html.offsetHeight : 0
+                );
+                return {
+                    totalHeight: totalHeight,
+                    viewportHeight: window.innerHeight || 800
+                };
+            }""")
+            
+            total_height = dimensions.get("totalHeight", 1000)
+            viewport_height = dimensions.get("viewportHeight", 800)
+            # Use an overlap of ~120px so sentences aren't split across cuts
+            step = max(300, viewport_height - 120)
+            
+            current_y = 0
+            slice_idx = 1
+
+            while current_y < total_height and slice_idx <= max_slices:
+                self.page.evaluate(f"window.scrollTo(0, {current_y});")
+                time.sleep(0.35)  # allow dynamic content and lazy images to settle
+
+                filepath = SCREENSHOTS_DIR / f"{name_prefix}_{timestamp}_part{slice_idx}.png"
+                try:
+                    self.page.screenshot(path=str(filepath), full_page=False)
+                    captured_paths.append(str(filepath.resolve()))
+                except Exception:
+                    pass
+
+                # If current viewport already covers the bottom, break
+                if current_y + viewport_height >= total_height:
+                    break
+
+                current_y += step
+                slice_idx += 1
+
+                # Re-check total height dynamically in case lazy loading expanded the page
+                try:
+                    new_total_height = self.page.evaluate("() => Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0)")
+                    if new_total_height > total_height:
+                        total_height = min(new_total_height, 15000)  # safety cap
+                except Exception:
+                    pass
+
+            # Restore scroll position to top
+            self.page.evaluate("window.scrollTo(0, 0);")
+            time.sleep(0.2)
+
         except Exception:
-            self.page.screenshot(path=str(filepath), full_page=False)
-        return str(filepath.resolve())
+            pass
+
+        # Fallback to single shot if multi-slice capture produced no images
+        if not captured_paths:
+            single_path = SCREENSHOTS_DIR / f"{name_prefix}_{timestamp}.png"
+            try:
+                self.page.screenshot(path=str(single_path), full_page=True)
+            except Exception:
+                self.page.screenshot(path=str(single_path), full_page=False)
+            captured_paths.append(str(single_path.resolve()))
+
+        return captured_paths
+
+    def capture_screenshot(self, name_prefix: str = "screen") -> str:
+        """Captures screenshot(s) and returns primary screenshot path for backward compatibility."""
+        paths = self.capture_screenshots(name_prefix=name_prefix)
+        return paths[0] if paths else ""
 
     def extract_job_info(self) -> ExtractedJobInfo:
         """Extracts job title, company, location, criteria, and description text from the page."""
         self.clean_page_for_capture()
 
-        # 1. Capture clean visual screenshot
-        screenshot_path = self.capture_screenshot("job_posting")
+        # 1. Capture clean visual screenshots across full page
+        screenshot_paths = self.capture_screenshots("job_posting")
+        screenshot_path = screenshot_paths[0] if screenshot_paths else None
 
         # 2. Extract title using priority heuristics
         title = "Unknown Position"
@@ -289,6 +367,7 @@ class FormExtractor:
             requirements_text=description,
             key_skills=key_skills,
             screenshot_path=screenshot_path,
+            screenshot_paths=screenshot_paths,
         )
 
     def ensure_application_form_open(self) -> bool:

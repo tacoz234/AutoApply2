@@ -65,11 +65,28 @@ AutoApply2/
 ## Quickstart Guide
 
 ### 1. Requirements & Dependencies
-Ensure Python 3.10+ is installed:
+Ensure Python 3.9+ is installed. It is recommended to run inside an isolated virtual environment:
+
+**macOS / Linux:**
 ```bash
+# 1. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 2. Install dependencies & Playwright's Chromium browser
 pip install -r requirements.txt
 playwright install chromium
 ```
+
+**Windows:**
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+playwright install chromium
+```
+
+> **Note**: Always activate the virtual environment (`source .venv/bin/activate`) before running `python run_gui.py` so that `python`, `pip`, and `playwright` are available in your shell.
 
 ### 2. Configure Local Models (Ollama)
 ApplyFlow integrates with your local Ollama instance (`http://localhost:11434`):

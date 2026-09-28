@@ -115,6 +115,7 @@ class JobScorer:
         job_description: str,
         user_profile: UserProfile,
         screenshot_path: Optional[str] = None,
+        screenshot_paths: Optional[List[str]] = None,
     ) -> MatchScoreResult:
         """Runs the brutal candidate-job gap analysis."""
         profile_summary = {
@@ -150,14 +151,22 @@ Provide your brutal critique and callback probability in strict JSON format.
         # Check if screenshot is available and model supports vision
         images = []
         prefer_vision = False
-        if screenshot_path and Path(screenshot_path).exists():
-            try:
-                with open(screenshot_path, "rb") as img_file:
-                    b64_image = base64.b64encode(img_file.read()).decode("utf-8")
-                    images.append(b64_image)
-                    prefer_vision = True
-            except Exception:
-                pass
+        all_screen_paths: List[str] = []
+        if screenshot_paths:
+            all_screen_paths.extend([p for p in screenshot_paths if p])
+        elif screenshot_path:
+            all_screen_paths.append(screenshot_path)
+
+        for sp in all_screen_paths:
+            p = Path(sp)
+            if p.exists():
+                try:
+                    with open(p, "rb") as img_file:
+                        b64_image = base64.b64encode(img_file.read()).decode("utf-8")
+                        images.append(b64_image)
+                        prefer_vision = True
+                except Exception:
+                    pass
 
         active_model = self._get_active_model(prefer_vision=prefer_vision)
 

@@ -710,11 +710,46 @@ function renderScorecard(data) {
 
   const imgEl = document.getElementById("job-screenshot-img");
   const wrapperEl = document.getElementById("job-screenshot-wrapper");
+  const slicesEl = document.getElementById("job-screenshot-slices");
   if (data.initial_screenshot) {
     imgEl.src = data.initial_screenshot;
     wrapperEl.style.display = "block";
+
+    if (slicesEl) {
+      slicesEl.innerHTML = "";
+      const slices = data.initial_screenshots && data.initial_screenshots.length > 0
+        ? data.initial_screenshots
+        : [data.initial_screenshot];
+
+      if (slices.length > 1) {
+        slicesEl.style.display = "flex";
+        slices.forEach((sliceUrl, idx) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = `btn btn-sm ${idx === 0 ? "btn-primary" : "btn-outline"}`;
+          btn.style.padding = "3px 8px";
+          btn.style.fontSize = "11px";
+          btn.innerText = `Part ${idx + 1}`;
+          btn.title = `View screenshot slice ${idx + 1} of ${slices.length}`;
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            imgEl.src = sliceUrl;
+            slicesEl.querySelectorAll("button").forEach((b) => {
+              b.classList.remove("btn-primary");
+              b.classList.add("btn-outline");
+            });
+            btn.classList.remove("btn-outline");
+            btn.classList.add("btn-primary");
+          });
+          slicesEl.appendChild(btn);
+        });
+      } else {
+        slicesEl.style.display = "none";
+      }
+    }
   } else {
     wrapperEl.style.display = "none";
+    if (slicesEl) slicesEl.style.display = "none";
   }
 
   const score = data.score || {};

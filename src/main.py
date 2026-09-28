@@ -155,6 +155,7 @@ def run_apply_pipeline(url: str):
                 job_description=job_info.description,
                 user_profile=profile,
                 screenshot_path=job_info.screenshot_path,
+                screenshot_paths=job_info.screenshot_paths,
             )
 
             # Display scorecard

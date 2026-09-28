@@ -73,6 +73,7 @@ class AutofillSession:
         self.key_skills: List[str] = []
         self.description = ""
         self.initial_screenshot = ""
+        self.initial_screenshots: List[str] = []
         self.post_screenshot = ""
         self.score_result: Optional[Dict[str, Any]] = None
         self.fill_steps: List[Dict[str, Any]] = []
@@ -110,6 +111,7 @@ class AutofillSession:
             self.key_skills = []
             self.description = ""
             self.initial_screenshot = ""
+            self.initial_screenshots = []
             self.post_screenshot = ""
             self.score_result = None
             self.fill_steps = []
@@ -228,6 +230,7 @@ def get_status():
             "key_skills": session.key_skills,
             "description": session.description,
             "initial_screenshot": session.initial_screenshot,
+            "initial_screenshots": session.initial_screenshots,
             "post_screenshot": session.post_screenshot,
             "score_result": session.score_result,
             "fill_steps": session.fill_steps,
@@ -435,8 +438,13 @@ def scan_job_url(req: ScanRequest):
             if job_info.key_skills:
                 dev_logger.log("INFO", f"Detected Target Tech Stack: {', '.join(job_info.key_skills)}")
 
-            if job_info.screenshot_path:
+            if job_info.screenshot_paths:
+                session.initial_screenshots = [f"/screenshots/{Path(p).name}" for p in job_info.screenshot_paths]
+                session.initial_screenshot = session.initial_screenshots[0]
+                dev_logger.log("INFO", f"Saved {len(job_info.screenshot_paths)} initial visual page screenshots: {[Path(p).name for p in job_info.screenshot_paths]}")
+            elif job_info.screenshot_path:
                 session.initial_screenshot = f"/screenshots/{Path(job_info.screenshot_path).name}"
+                session.initial_screenshots = [session.initial_screenshot]
                 dev_logger.log("INFO", f"Saved initial visual screenshot: {Path(job_info.screenshot_path).name}")
 
             # Calculate Brutally Honest Gap Score
@@ -447,6 +455,7 @@ def scan_job_url(req: ScanRequest):
                 job_description=job_info.description,
                 user_profile=profile,
                 screenshot_path=job_info.screenshot_path,
+                screenshot_paths=job_info.screenshot_paths,
             )
 
             session.score_result = score.model_dump()
@@ -464,6 +473,7 @@ def scan_job_url(req: ScanRequest):
             "key_skills": session.key_skills,
             "description": session.description,
             "initial_screenshot": session.initial_screenshot,
+            "initial_screenshots": session.initial_screenshots,
             "score": session.score_result,
         }
     except Exception as e:
