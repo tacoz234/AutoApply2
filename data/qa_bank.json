@@ -173,5 +173,101 @@
     "answer": "Yes",
     "field_type": "text",
     "created_at": "2026-09-25T20:52:52.524399+00:00"
+  },
+  {
+    "id": "linux_devops_experience",
+    "category": "technical",
+    "question_patterns": [
+      "which option best describes your total linux systems administration or devops software development experience",
+      "total linux systems administration or devops software development experience",
+      "linux systems administration or devops software development experience",
+      "linux systems administration experience",
+      "devops software development experience",
+      "linux administration"
+    ],
+    "answer": "3 - 5 years",
+    "field_type": "select",
+    "created_at": "2026-09-29T15:24:00Z"
+  },
+  {
+    "id": "programming_experience_languages",
+    "category": "technical",
+    "question_patterns": [
+      "which option best describes your total work in at least two of the following python java perl php ruby or bash shell experience",
+      "total work in at least two of the following python java",
+      "python java perl php ruby or bash shell experience",
+      "python java experience",
+      "python and java experience"
+    ],
+    "answer": "3 - 5 years",
+    "field_type": "select",
+    "created_at": "2026-09-29T15:24:00Z"
+  },
+  {
+    "id": "degree_or_related_experience",
+    "category": "education",
+    "question_patterns": [
+      "do you have a bachelor s degree in computer science or other technical field or 2 years of related experience",
+      "bachelor s degree in computer science or other technical field",
+      "bachelor degree in computer science or related experience",
+      "bachelor degree in computer science",
+      "degree in computer science or related experience"
+    ],
+    "answer": "Yes",
+    "field_type": "select",
+    "created_at": "2026-09-29T15:24:00Z"
+  },
+  {
+    "id": "networking_fundamentals",
+    "category": "technical",
+    "question_patterns": [
+      "do you have knowledge of networking fundamentals",
+      "knowledge of networking fundamentals",
+      "networking fundamentals",
+      "knowledge of networking"
+    ],
+    "answer": "Yes",
+    "field_type": "select",
+    "created_at": "2026-09-29T15:24:00Z"
+  },
+  {
+    "id": "production_environment_24_7",
+    "category": "operations",
+    "question_patterns": [
+      "do you have experience working in a 24 7 high availability production environment",
+      "experience working in a 24 7 high availability production environment",
+      "working in a 24 7 high availability production environment",
+      "24 7 high availability production environment",
+      "24 7 production environment"
+    ],
+    "answer": "Yes",
+    "field_type": "select",
+    "created_at": "2026-09-29T15:24:00Z"
+  },
+  {
+    "id": "on_call_rotation",
+    "category": "operations",
+    "question_patterns": [
+      "are you able to participate in an on call rotation",
+      "participate in an on call rotation",
+      "willing and able to participate in an on call rotation",
+      "on call rotation"
+    ],
+    "answer": "Yes",
+    "field_type": "select",
+    "created_at": "2026-09-29T15:24:00Z"
+  },
+  {
+    "id": "hardware_troubleshooting",
+    "category": "technical",
+    "question_patterns": [
+      "which of the following describes your experience with hardware troubleshooting or data center operations",
+      "experience with hardware troubleshooting or data center operations",
+      "hardware troubleshooting or data center operations",
+      "hardware troubleshooting"
+    ],
+    "answer": "1 - 3 years",
+    "field_type": "select",
+    "created_at": "2026-09-29T15:24:00Z"
   }
 ]

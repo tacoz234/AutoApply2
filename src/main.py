@@ -50,6 +50,7 @@ from src.extractor import FormExtractor
 from src.filler import FormFiller
 from src.scorer import JobScorer
 from src.storage import StorageManager, UserProfile
+from src.validator import FormDoubleChecker
 
 
 app = typer.Typer(help="ApplyFlow: Local Automated Job Application Assistant")
@@ -255,6 +256,25 @@ def run_apply_pipeline(url: str):
                     border_style="green",
                 )
             )
+
+            # Scrapling high-speed DOM double-checker
+            val_rep = FormDoubleChecker.validate_page(page)
+            if val_rep.get("is_valid"):
+                console.print(
+                    Panel.fit(
+                        f"[bold green]⚡ Scrapling Double-Checker: VERIFIED[/bold green]\n"
+                        f"[white]{val_rep.get('message')}[/white]",
+                        border_style="green",
+                    )
+                )
+            else:
+                console.print(
+                    Panel.fit(
+                        f"[bold yellow]⚠️ Scrapling Double-Checker: ATTENTION NEEDED[/bold yellow]\n"
+                        f"[white]{val_rep.get('message')}[/white]",
+                        border_style="yellow",
+                    )
+                )
 
             # Final Safety Confirmation Gate
             console.print(

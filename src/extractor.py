@@ -13,6 +13,12 @@ from pydantic import BaseModel, Field
 
 from src.config import SCREENSHOTS_DIR
 
+try:
+    from scrapling import Adaptor
+    HAS_SCRAPLING = True
+except ImportError:
+    HAS_SCRAPLING = False
+
 
 class ExtractedJobInfo(BaseModel):
     title: str = "Unknown Role"
@@ -217,81 +223,127 @@ class FormExtractor:
         screenshot_paths = self.capture_screenshots("job_posting")
         screenshot_path = screenshot_paths[0] if screenshot_paths else None
 
-        # 2. Extract title using priority heuristics
+        # 2. Ultra-Fast In-Memory Extraction via Scrapling Adaptor
         title = "Unknown Position"
-        title_selectors = [
-            "h1.top-card-layout__title",
-            "h1.topcard__title",
-            ".job-details-jobs-unified-top-card__job-title",
-            ".jobs-unified-top-card__job-title",
-            "h1.t-24",
-            ".jobs-details__main-content h1",
-            "h1",
-            "[data-qa='job-title']",
-            ".posting-headline h2",
-            ".app-title",
-            "[class*='title'] h1",
-            "[class*='jobTitle']",
-        ]
-        for sel in title_selectors:
-            loc = self.page.locator(sel).first
-            if loc.count() > 0 and loc.is_visible():
-                text = loc.inner_text().strip()
-                if text and len(text) < 140:
-                    title = text
-                    break
-
-        # If still unknown, check document title
-        if title == "Unknown Position":
-            doc_title = self.page.title()
-            if " - " in doc_title:
-                title = doc_title.split(" - ")[0].strip()
-            elif " | " in doc_title:
-                title = doc_title.split(" | ")[0].strip()
-            elif doc_title:
-                title = doc_title.strip()
-
-        # 3. Extract company name
         company = "Target Company"
-        company_selectors = [
-            "a.topcard__org-name-link",
-            ".topcard__flavor--black-link",
-            ".job-details-jobs-unified-top-card__company-name a",
-            ".job-details-jobs-unified-top-card__company-name",
-            ".jobs-unified-top-card__company-name",
-            "a.ember-view[href*='/company/']",
-            "a[href*='linkedin.com/company/']",
-            "[data-qa='company-name']",
-            ".posting-categories .org",
-            ".company-name",
-            "[class*='company']",
-            "meta[property='og:site_name']",
-        ]
-        for sel in company_selectors:
-            loc = self.page.locator(sel).first
-            if loc.count() > 0:
-                text = loc.get_attribute("content") if "meta" in sel else loc.inner_text().strip()
-                if text and len(text) < 80:
-                    company = text
-                    break
-
-        # 4. Extract Location
         location = ""
-        location_selectors = [
-            "span.topcard__flavor--bullet",
-            ".top-card-layout__first-subline .topcard__flavor:nth-child(2)",
-            ".job-details-jobs-unified-top-card__primary-description-container span",
-            ".posting-categories .location",
-            "[data-qa='job-location']",
-            "[class*='location']",
-        ]
-        for sel in location_selectors:
-            loc = self.page.locator(sel).first
-            if loc.count() > 0:
-                loc_text = loc.inner_text().strip()
-                if loc_text and len(loc_text) < 100:
-                    location = loc_text
-                    break
+        description = ""
+        doc = None
+
+        if HAS_SCRAPLING:
+            try:
+                doc = Adaptor(self.page.content())
+                # Fast Title Extraction
+                t_node = doc.css_first(
+                    "h1.top-card-layout__title, h1.topcard__title, .job-details-jobs-unified-top-card__job-title, "
+                    ".jobs-unified-top-card__job-title, h1.t-24, .jobs-details__main-content h1, h1, [data-qa='job-title'], "
+                    ".posting-headline h2, .app-title, [class*='title'] h1, [class*='jobTitle']"
+                )
+                if t_node and t_node.text and len(t_node.text.strip()) < 140:
+                    title = t_node.text.strip()
+
+                # Fast Company Extraction
+                comp_node = doc.css_first(
+                    "a.topcard__org-name-link, .topcard__flavor--black-link, .job-details-jobs-unified-top-card__company-name a, "
+                    ".job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, "
+                    "a[href*='linkedin.com/company/'], [data-qa='company-name'], .posting-categories .org, .company-name, [class*='company']"
+                )
+                if comp_node and comp_node.text and len(comp_node.text.strip()) < 80:
+                    company = comp_node.text.strip()
+
+                # Fast Location Extraction
+                loc_node = doc.css_first(
+                    "span.topcard__flavor--bullet, .top-card-layout__first-subline .topcard__flavor:nth-child(2), "
+                    ".job-details-jobs-unified-top-card__primary-description-container span, .posting-categories .location, "
+                    "[data-qa='job-location'], [class*='location']"
+                )
+                if loc_node and loc_node.text and len(loc_node.text.strip()) < 100:
+                    location = loc_node.text.strip()
+
+                # Fast Description Extraction
+                desc_node = doc.css_first(
+                    ".show-more-less-html__markup, .description__text, .decorated-job-posting__details, "
+                    "#job-details, .jobs-description__content, .jobs-box__html-content, .jobs-description, "
+                    "article.jobs-description__container, #content, .posting-description, .job-description, [data-qa='job-description'], article, main"
+                )
+                if desc_node and desc_node.text and len(desc_node.text.strip()) > 100:
+                    description = desc_node.text.strip()
+
+            except Exception:
+                pass
+
+        # Fallback to Playwright Locators if any field was not resolved
+        if title == "Unknown Position":
+            title_selectors = [
+                "h1.top-card-layout__title",
+                "h1.topcard__title",
+                ".job-details-jobs-unified-top-card__job-title",
+                ".jobs-unified-top-card__job-title",
+                "h1.t-24",
+                ".jobs-details__main-content h1",
+                "h1",
+                "[data-qa='job-title']",
+                ".posting-headline h2",
+                ".app-title",
+                "[class*='title'] h1",
+                "[class*='jobTitle']",
+            ]
+            for sel in title_selectors:
+                loc = self.page.locator(sel).first
+                if loc.count() > 0 and loc.is_visible():
+                    text = loc.inner_text().strip()
+                    if text and len(text) < 140:
+                        title = text
+                        break
+
+            if title == "Unknown Position":
+                doc_title = self.page.title()
+                if " - " in doc_title:
+                    title = doc_title.split(" - ")[0].strip()
+                elif " | " in doc_title:
+                    title = doc_title.split(" | ")[0].strip()
+                elif doc_title:
+                    title = doc_title.strip()
+
+        if company == "Target Company":
+            company_selectors = [
+                "a.topcard__org-name-link",
+                ".topcard__flavor--black-link",
+                ".job-details-jobs-unified-top-card__company-name a",
+                ".job-details-jobs-unified-top-card__company-name",
+                ".jobs-unified-top-card__company-name",
+                "a.ember-view[href*='/company/']",
+                "a[href*='linkedin.com/company/']",
+                "[data-qa='company-name']",
+                ".posting-categories .org",
+                ".company-name",
+                "[class*='company']",
+                "meta[property='og:site_name']",
+            ]
+            for sel in company_selectors:
+                loc = self.page.locator(sel).first
+                if loc.count() > 0:
+                    text = loc.get_attribute("content") if "meta" in sel else loc.inner_text().strip()
+                    if text and len(text) < 80:
+                        company = text
+                        break
+
+        if not location:
+            location_selectors = [
+                "span.topcard__flavor--bullet",
+                ".top-card-layout__first-subline .topcard__flavor:nth-child(2)",
+                ".job-details-jobs-unified-top-card__primary-description-container span",
+                ".posting-categories .location",
+                "[data-qa='job-location']",
+                "[class*='location']",
+            ]
+            for sel in location_selectors:
+                loc = self.page.locator(sel).first
+                if loc.count() > 0:
+                    loc_text = loc.inner_text().strip()
+                    if loc_text and len(loc_text) < 100:
+                        location = loc_text
+                        break
 
         # 5. Extract Seniority & Employment Type
         seniority = ""
@@ -307,30 +359,30 @@ class FormExtractor:
         except Exception:
             pass
 
-        # 6. Extract job description body
-        desc_selectors = [
-            ".show-more-less-html__markup",
-            ".description__text",
-            ".decorated-job-posting__details",
-            "#job-details",
-            ".jobs-description__content",
-            ".jobs-box__html-content",
-            ".jobs-description",
-            "article.jobs-description__container",
-            "#content",
-            ".posting-description",
-            ".job-description",
-            "[data-qa='job-description']",
-            "article",
-            "main",
-        ]
-        description = ""
-        for sel in desc_selectors:
-            loc = self.page.locator(sel).first
-            if loc.count() > 0:
-                description = loc.inner_text().strip()
-                if len(description) > 100:
-                    break
+        # Fallback for description if not found via Scrapling
+        if not description or len(description) < 100:
+            desc_selectors = [
+                ".show-more-less-html__markup",
+                ".description__text",
+                ".decorated-job-posting__details",
+                "#job-details",
+                ".jobs-description__content",
+                ".jobs-box__html-content",
+                ".jobs-description",
+                "article.jobs-description__container",
+                "#content",
+                ".posting-description",
+                ".job-description",
+                "[data-qa='job-description']",
+                "article",
+                "main",
+            ]
+            for sel in desc_selectors:
+                loc = self.page.locator(sel).first
+                if loc.count() > 0:
+                    description = loc.inner_text().strip()
+                    if len(description) > 100:
+                        break
 
         if not description or len(description) < 100:
             body_text = self.page.locator("body").inner_text()
@@ -650,11 +702,10 @@ class FormExtractor:
         else:
             # External career portal / ATS
             modal_container = self.page.locator("div[role='dialog']").first
-            if modal_container.count() > 0 and modal_container.is_visible():
+            if modal_container.count() > 0 and modal_container.is_visible() and modal_container.locator("input, select, textarea, button[aria-haspopup='listbox']").count() > 0:
                 root = modal_container
             else:
-                form_container = self.page.locator("form, #application_form, #application-form, [data-qa='application-form'], [data-automation-id*='form']").first
-                root = form_container if form_container.count() > 0 else self.page
+                root = self.page
 
         # 1. Process File Inputs (Resume / CV Upload)
         file_locators = root.locator("input[type='file']")
@@ -741,12 +792,19 @@ class FormExtractor:
                     )
                 )
 
-        # 4. Process Select Dropdowns
+        # 4. Process Select Dropdowns (Native <select> and Custom ARIA Comboboxes / Triggers)
+        # 4A. Native <select> elements (both visible and styled/hidden by custom UI wrappers)
         select_locators = root.locator("select")
         for i in range(select_locators.count()):
             loc = select_locators.nth(i)
             if not loc.is_visible():
-                continue
+                # If select itself is styled/hidden, only process if parent or wrapper is visible
+                try:
+                    if not loc.locator("xpath=..").is_visible():
+                        continue
+                except Exception:
+                    continue
+
             name = loc.get_attribute("name") or ""
             label = self._resolve_label(loc, name)
             field_id = f"select_{loc.get_attribute('id') or name or i}"
@@ -756,7 +814,7 @@ class FormExtractor:
             opt_locs = loc.locator("option")
             for j in range(opt_locs.count()):
                 text = opt_locs.nth(j).inner_text().strip()
-                if text and text.lower() not in ("select...", "choose...", "-- select --", ""):
+                if text and text.lower() not in ("select...", "choose...", "-- select --", "select an option", ""):
                     options.append(text)
 
             if field_id not in seen_identifiers:
@@ -770,6 +828,90 @@ class FormExtractor:
                         options=options,
                         required=self._is_field_required(loc, label),
                         selector=f"select >> nth={i}",
+                    )
+                )
+
+        # 4B. Custom ARIA Dropdowns / Comboboxes (Cloudscape, React Select, Material UI, AWS UI)
+        custom_triggers = root.locator(
+            "button[aria-haspopup='listbox'], "
+            "div[role='combobox'], "
+            "button[role='combobox'], "
+            "[data-qa*='select-trigger'], "
+            "[data-automation-id*='select'], "
+            "button[class*='select-trigger'], "
+            "div[class*='awsui-select'] button, "
+            "button:has-text('Select an option'), "
+            "button:has-text('Choose an option'), "
+            "button:has-text('Select one')"
+        )
+        for i in range(custom_triggers.count()):
+            loc = custom_triggers.nth(i)
+            if not loc.is_visible():
+                continue
+
+            # Skip if adjacent or ancestor already has a native select we extracted
+            try:
+                if loc.locator("xpath=ancestor::div[1]//select").count() > 0:
+                    continue
+            except Exception:
+                pass
+
+            el_id = loc.get_attribute("id") or ""
+            name = loc.get_attribute("name") or ""
+            aria_label = loc.get_attribute("aria-label") or ""
+            placeholder = loc.inner_text().strip() if loc.inner_text() else ""
+
+            label = self._resolve_label(loc, aria_label or name or "")
+            if not label or label.lower() in ("select an option", "choose an option", "select one", "untitled field"):
+                try:
+                    wrapper = loc.locator("xpath=ancestor::div[contains(@class, 'form-field') or contains(@class, 'awsui-form-field') or contains(@class, 'field') or contains(@class, 'question')][1]").first
+                    if wrapper.count() > 0:
+                        lbl_el = wrapper.locator("label, [class*='label'], [class*='header'], h3, h4, p").first
+                        if lbl_el.count() > 0:
+                            label = re.sub(r"[\s*]+$", "", lbl_el.inner_text().strip()).strip()
+                except Exception:
+                    pass
+
+            field_id = f"custom_select_{el_id or loc.get_attribute('aria-labelledby') or i}"
+
+            # Check if listbox options are already available in DOM via aria-controls
+            options = []
+            listbox_id = loc.get_attribute("aria-controls")
+            if listbox_id:
+                try:
+                    opt_elements = self.page.locator(f"#{listbox_id} [role='option'], #{listbox_id} li")
+                    for j in range(opt_elements.count()):
+                        opt_text = opt_elements.nth(j).inner_text().strip()
+                        if opt_text and opt_text.lower() not in ("select an option", "select...", "choose...", ""):
+                            options.append(opt_text)
+                except Exception:
+                    pass
+
+            # Build robust selector
+            if el_id:
+                selector = f"#{el_id}"
+            elif loc.get_attribute("aria-labelledby"):
+                selector = f"[aria-labelledby='{loc.get_attribute('aria-labelledby')}']"
+            else:
+                selector = (
+                    "button[aria-haspopup='listbox'], div[role='combobox'], button[role='combobox'], "
+                    "[data-qa*='select-trigger'], button[class*='select-trigger'], div[class*='awsui-select'] button, "
+                    "button:has-text('Select an option'), button:has-text('Choose an option'), button:has-text('Select one')"
+                    f" >> nth={i}"
+                )
+
+            if field_id not in seen_identifiers:
+                seen_identifiers.add(field_id)
+                fields.append(
+                    ExtractedField(
+                        id=field_id,
+                        label=label or "Job-specific Question",
+                        field_type="select",
+                        name=name,
+                        placeholder=placeholder,
+                        options=options,
+                        required=self._is_field_required(loc, label),
+                        selector=selector,
                     )
                 )
 
@@ -814,6 +956,31 @@ class FormExtractor:
             aria_req = locator.get_attribute("aria-required")
             if aria_req and aria_req.lower() == "true":
                 return True
+            # Check referenced labels via aria-labelledby
+            aria_labelledby = locator.get_attribute("aria-labelledby")
+            if aria_labelledby:
+                for ref_id in aria_labelledby.split():
+                    ref_id = ref_id.strip()
+                    if not ref_id:
+                        continue
+                    try:
+                        lbl_el = self.page.locator(f"#{ref_id}").first
+                        if lbl_el.count() > 0 and "*" in lbl_el.inner_text():
+                            return True
+                    except Exception:
+                        pass
+            # Check outermost question container wrapper for asterisk
+            wrapper = locator.locator(
+                "xpath=ancestor::div["
+                "contains(@class, 'awsui-form-field') or "
+                "contains(@class, 'form-field') or "
+                "contains(@class, 'field') or "
+                "contains(@class, 'question')"
+                "][last()]"
+            ).first
+            if wrapper.count() > 0:
+                if wrapper.locator("[aria-required='true'], [class*='required']").count() > 0 or "*" in wrapper.inner_text():
+                    return True
         except Exception:
             pass
         if "*" in label or "(required)" in label.lower():
@@ -825,16 +992,26 @@ class FormExtractor:
         # 1. Check aria-label
         aria_label = locator.get_attribute("aria-label")
         if aria_label and aria_label.strip():
-            return aria_label.strip()
+            clean_aria = re.sub(r"[\s*]+$", "", aria_label.strip()).strip()
+            if clean_aria and clean_aria.lower() not in ("select an option", "choose an option", "select one", "select...", "-- select --", ""):
+                return clean_aria
 
-        # 2. Check aria-labelledby
+        # 2. Check aria-labelledby (handles space-separated list of IDs like in Cloudscape/ARIA)
         aria_labelledby = locator.get_attribute("aria-labelledby")
         if aria_labelledby:
-            lbl_el = self.page.locator(f"#{aria_labelledby}").first
-            if lbl_el.count() > 0:
-                text = lbl_el.inner_text().strip()
-                if text:
-                    return text
+            for id_part in aria_labelledby.split():
+                id_part = id_part.strip()
+                if not id_part:
+                    continue
+                try:
+                    lbl_el = self.page.locator(f"#{id_part}").first
+                    if lbl_el.count() > 0:
+                        text = lbl_el.inner_text().strip()
+                        clean_text = re.sub(r"[\s*]+$", "", text).strip()
+                        if clean_text and clean_text.lower() not in ("select an option", "choose an option", "select one", "select...", "-- select --", ""):
+                            return clean_text
+                except Exception:
+                    pass
 
         # 3. Check element id linked with label for="id"
         el_id = locator.get_attribute("id")
@@ -842,32 +1019,59 @@ class FormExtractor:
             lbl = self.page.locator(f"label[for='{el_id}']").first
             if lbl.count() > 0:
                 text = lbl.inner_text().strip()
-                if text:
-                    return text
+                clean_text = re.sub(r"[\s*]+$", "", text).strip()
+                if clean_text:
+                    return clean_text
 
         # 4. Check parent label container
         try:
             parent_label = locator.locator("xpath=ancestor::label").first
             if parent_label.count() > 0:
                 text = parent_label.inner_text().strip()
-                if text:
-                    return text
+                clean_text = re.sub(r"[\s*]+$", "", text).strip()
+                if clean_text:
+                    return clean_text
         except Exception:
             pass
 
-        # 5. Check immediate preceding label or text element in same wrapper
+        # 5. Check ancestor form-field / question wrapper
         try:
-            wrapper = locator.locator("xpath=ancestor::div[contains(@class, 'field') or contains(@class, 'form-group') or contains(@class, 'application-question')]").first
+            wrapper = locator.locator(
+                "xpath=ancestor::div["
+                "contains(@class, 'awsui-form-field') or "
+                "contains(@class, 'form-field') or "
+                "contains(@class, 'form-group') or "
+                "contains(@class, 'field') or "
+                "contains(@class, 'question') or "
+                "contains(@class, 'formField') or "
+                "contains(@data-qa, 'question') or "
+                "contains(@data-automation-id, 'formField') or "
+                "contains(@role, 'group')"
+                "][1]"
+            ).first
             if wrapper.count() > 0:
-                lbl = wrapper.locator("label, .label, legend, [class*='label']").first
+                lbl = wrapper.locator("label, legend, [class*='label'], [class*='header'], [class*='title'], h2, h3, h4, h5, p").first
                 if lbl.count() > 0:
                     text = lbl.inner_text().strip()
-                    if text:
-                        return text
+                    clean_text = re.sub(r"[\s*]+$", "", text).strip()
+                    if clean_text and clean_text.lower() not in ("select an option", "choose an option", "select one", "select...", "-- select --", ""):
+                        return clean_text
         except Exception:
             pass
 
-        return fallback.strip() or "Untitled Field"
+        # 6. Check preceding label or text in DOM
+        try:
+            prev = locator.locator("xpath=preceding::label[1] | xpath=../preceding-sibling::*[1]//label | xpath=../../preceding-sibling::*[1]").first
+            if prev.count() > 0:
+                text = prev.inner_text().strip()
+                clean_text = re.sub(r"[\s*]+$", "", text).strip()
+                if clean_text and len(clean_text) > 3 and clean_text.lower() not in ("select an option", "choose an option", "select one", "select...", "-- select --", ""):
+                    return clean_text
+        except Exception:
+            pass
+
+        clean_fallback = re.sub(r"[\s*]+$", "", fallback.strip()).strip()
+        return clean_fallback or "Untitled Field"
 
     def _extract_radio_groups(self, root: Locator) -> List[ExtractedField]:
         """Groups radio buttons by group name or container."""

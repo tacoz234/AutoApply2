@@ -42,6 +42,7 @@ from src.extractor import ExtractedField, FormExtractor
 from src.filler import FillSummary, FormFiller
 from src.scorer import JobScorer, MatchScoreResult
 from src.storage import ApplicationLog, QABankEntry, StorageManager, UserProfile
+from src.validator import FormDoubleChecker
 from tests.mock_ats_server import MockATSHandler
 from http.server import HTTPServer
 
@@ -78,6 +79,7 @@ class AutofillSession:
         self.score_result: Optional[Dict[str, Any]] = None
         self.fill_steps: List[Dict[str, Any]] = []
         self.summary: Dict[str, Any] = {"filled": 0, "skipped": 0, "added": 0}
+        self.validation_report: Optional[Dict[str, Any]] = None
         self.error_message = ""
 
         # Thread synchronization events
@@ -116,6 +118,7 @@ class AutofillSession:
             self.score_result = None
             self.fill_steps = []
             self.summary = {"filled": 0, "skipped": 0, "added": 0}
+            self.validation_report = None
             self.error_message = ""
             self.pending_question = None
             self.user_answer = None
@@ -235,6 +238,7 @@ def get_status():
             "score_result": session.score_result,
             "fill_steps": session.fill_steps,
             "summary": session.summary,
+            "validation_report": session.validation_report,
             "pending_question": session.pending_question,
             "pending_essay": session.pending_essay,
             "pending_pin": session.pending_pin,
@@ -635,14 +639,24 @@ def _run_autofill_worker():
 
             summary = filler.fill_multi_step_form(extractor)
             post_screenshot_path = extractor.capture_screenshot("post_fill")
+
+            # Scrapling high-speed DOM double-checker (<15ms)
+            validation_report = FormDoubleChecker.validate_page(page)
+            if not validation_report.get("is_valid"):
+                dev_logger.log("WARN", f"Double-Checker flagged issues: {validation_report.get('message')}")
+            else:
+                dev_logger.log("SUCCESS", f"Double-Checker passed: {validation_report.get('message')}")
+
             dev_logger.log("SUCCESS", f"Autofill execution complete. Filled: {summary.fields_filled}, Skipped: {summary.fields_skipped}, Added to QA: {summary.questions_added_to_qa}")
 
             with session.lock:
                 session.post_screenshot = f"/screenshots/{Path(post_screenshot_path).name}"
+                session.validation_report = validation_report
                 session.summary = {
                     "filled": summary.fields_filled,
                     "skipped": summary.fields_skipped,
                     "added": summary.questions_added_to_qa,
+                    "validation": validation_report,
                 }
                 session.status = "review_ready"
                 session.submit_event.clear()
