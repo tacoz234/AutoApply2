@@ -2055,3 +2055,44 @@ body {
   flex: 1;
 }
 
+/* Active Profile Banner */
+.active-profile-banner {
+  background: #ffffff;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 12px 18px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: 4px 4px 0px var(--ink);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.active-profile-banner:hover {
+  transform: translateY(-1px);
+  box-shadow: 5px 5px 0px var(--ink);
+}
+
+.active-profile-details {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.profile-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip-divider {
+  color: var(--ink-secondary);
+  opacity: 0.5;
+}
+

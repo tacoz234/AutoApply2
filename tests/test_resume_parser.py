@@ -10,6 +10,16 @@ class TestResumeParser(unittest.TestCase):
     def setUp(self):
         self.parser = ResumeParser()
         self.sample_pdf = Path("data/sample_resume.pdf")
+        self.profile_path = Path("data/user_profile.json")
+        self.orig_profile_data = self.profile_path.read_text(encoding="utf-8") if self.profile_path.exists() else None
+        self.qa_path = Path("data/qa_bank.json")
+        self.orig_qa_data = self.qa_path.read_text(encoding="utf-8") if self.qa_path.exists() else None
+
+    def tearDown(self):
+        if self.orig_profile_data is not None and self.profile_path.exists():
+            self.profile_path.write_text(self.orig_profile_data, encoding="utf-8")
+        if self.orig_qa_data is not None and self.qa_path.exists():
+            self.qa_path.write_text(self.orig_qa_data, encoding="utf-8")
 
     def test_extract_text_from_pdf(self):
         """Verifies text extraction from sample resume PDF."""
@@ -129,14 +139,10 @@ class TestResumeParser(unittest.TestCase):
         self.assertEqual(reset_resp.status_code, 200)
         self.assertFalse(reset_resp.json()["is_setup_completed"])
 
-        # Clean up uploaded test file and reset profile
+        # Clean up uploaded test file
         test_file = Path("data/upload_test_resume.pdf")
         if test_file.exists():
             test_file.unlink()
-        sm = StorageManager()
-        p = sm.load_profile()
-        p.resume_file = "sample_resume.pdf"
-        sm.save_profile(p)
 
 
 if __name__ == "__main__":

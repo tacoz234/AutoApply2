@@ -371,62 +371,290 @@ class FormExtractor:
         )
 
     def ensure_application_form_open(self) -> bool:
-        """Detects if form is visible, or clicks 'Apply' / 'Apply Now' / 'Easy Apply' if needed."""
-        self.page.wait_for_load_state("domcontentloaded")
+        """Detects if form is visible, or clicks 'Apply' / 'Easy Apply' and follows redirects/new tabs."""
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=8000)
+        except Exception:
+            pass
         time.sleep(1)
 
-        # Check if form already exists and has input elements
+        # 1. Check if form already exists and has input elements
         if self._is_form_visible():
             return True
 
-        # Search for Apply buttons/links
-        apply_buttons = [
-            "button.jobs-apply-button",
-            "button:has-text('Easy Apply')",
+        # Listen for any new tab/window opened by clicking Apply
+        context = self.page.context
+        initial_pages = list(context.pages)
+        new_pages = []
+
+        def on_page_opened(p):
+            new_pages.append(p)
+
+        try:
+            context.on("page", on_page_opened)
+        except Exception:
+            pass
+
+        try:
+            # 2. Search for and click Apply buttons on the current page
+            clicked = self._click_apply_button()
+            if not clicked:
+                return self._is_form_visible()
+
+            # 3. Handle intermediate redirect modal or confirmation popup (e.g. LinkedIn "Continue to apply")
+            for _ in range(6):
+                time.sleep(0.5)
+                redirect_btn = self.page.locator(
+                    "div[role='dialog'] button:has-text('Continue'), "
+                    "div[role='dialog'] a:has-text('Continue'), "
+                    "div[role='dialog'] button:has-text('Apply'), "
+                    "div[role='dialog'] a:has-text('Apply on company website'), "
+                    ".artdeco-modal button:has-text('Continue'), "
+                    "button[aria-label*='Continue to apply'], "
+                    "a[aria-label*='Continue to apply']"
+                ).first
+                if redirect_btn.count() > 0 and redirect_btn.is_visible():
+                    try:
+                        redirect_btn.click()
+                        time.sleep(1.5)
+                        break
+                    except Exception:
+                        pass
+
+            # 4. Check if a new tab was opened
+            target_page = None
+            if new_pages:
+                target_page = new_pages[0]
+            elif len(context.pages) > len(initial_pages):
+                for p in context.pages:
+                    if p not in initial_pages:
+                        target_page = p
+                        break
+
+            if target_page and target_page != self.page:
+                try:
+                    target_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                except Exception:
+                    pass
+                time.sleep(2)
+                target_page.bring_to_front()
+                self.page = target_page
+
+            # 5. Wait for tracking redirects (e.g. linkedin.com/jobs/view/externalApply/...)
+            start_redir = time.time()
+            while time.time() - start_redir < 10:
+                if "externalapply" not in self.page.url.lower():
+                    break
+                time.sleep(0.5)
+
+            try:
+                self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+            time.sleep(1.5)
+
+            # 6. If we landed on external company site (e.g. Amazon, Workday, Greenhouse),
+            # check if the application form is visible. If not, click the external site's "Apply Now" button!
+            if not self._is_form_visible():
+                self._click_external_site_apply()
+
+            return self._is_form_visible()
+        finally:
+            try:
+                context.remove_listener("page", on_page_opened)
+            except Exception:
+                pass
+
+    def _click_apply_button(self) -> bool:
+        """Finds and clicks the primary Apply or Easy Apply button on the job page."""
+        apply_selectors = [
+            # LinkedIn Easy Apply button
+            ".job-details-jobs-unified-top-card button:has-text('Easy Apply')",
+            ".jobs-unified-top-card button:has-text('Easy Apply')",
+            ".jobs-details__main-content button:has-text('Easy Apply')",
+            "button.jobs-apply-button:has-text('Easy Apply')",
             "button[aria-label*='Easy Apply']",
+            ".jobs-s-apply button:has-text('Easy Apply')",
+            "button:has-text('Easy Apply')",
+
+            # LinkedIn External Apply button (in job card/details pane)
+            ".job-details-jobs-unified-top-card button.jobs-apply-button",
+            ".jobs-unified-top-card button.jobs-apply-button",
+            ".jobs-details__main-content button.jobs-apply-button",
+            ".jobs-apply-button--top-card button",
+            ".jobs-apply-button--top-card a",
             ".jobs-s-apply button",
+            ".jobs-s-apply a",
+            "button.jobs-apply-button",
+            "a.jobs-apply-button",
+            "button[aria-label*='Apply to']",
+            "button[aria-label*='Apply on company website']",
+            "a[aria-label*='Apply on company website']",
+            "a:has-text('Apply on company website')",
+
+            # Indeed Apply
+            "button#indeedApplyButton",
+            "div#indeedApplyButton",
+            "span:has-text('Apply now')",
+
+            # Generic ATS Apply buttons
             "a:has-text('Apply for this job')",
+            "button:has-text('Apply for this job')",
             "a:has-text('Apply Now')",
             "button:has-text('Apply Now')",
-            "button:has-text('Apply')",
-            "a:has-text('Apply')",
             "[data-qa='btn-apply']",
             ".postings-btn",
+            "button:has-text('Apply')",
+            "a:has-text('Apply')",
         ]
 
-        for sel in apply_buttons:
-            btn = self.page.locator(sel).first
-            if btn.count() > 0 and btn.is_visible():
-                try:
+        for sel in apply_selectors:
+            try:
+                btn = self.page.locator(sel).first
+                if btn.count() > 0 and btn.is_visible():
+                    btn_text = (btn.inner_text() or "").strip().lower()
+                    if "filter" in btn_text or "save" in btn_text or "alert" in btn_text:
+                        continue
+                    btn.scroll_into_view_if_needed()
+                    time.sleep(0.3)
                     btn.click()
-                    self.page.wait_for_load_state("domcontentloaded", timeout=5000)
-                    time.sleep(1.5)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _click_external_site_apply(self) -> bool:
+        """On external career sites, clicks 'Apply' or 'Apply Now' if form is not yet visible."""
+        external_selectors = [
+            "a:has-text('Apply now')",
+            "button:has-text('Apply now')",
+            "a:has-text('Apply for this job')",
+            "button:has-text('Apply for this job')",
+            "a:has-text('Apply online')",
+            "button:has-text('Apply online')",
+            "a:has-text('Start application')",
+            "button:has-text('Start application')",
+            "[data-automation-id*='apply']",
+            "[data-qa='btn-apply']",
+            "#apply_button",
+            "a[href*='#apply']",
+            "button:has-text('Apply')",
+            "a:has-text('Apply')",
+        ]
+
+        context = self.page.context
+        for sel in external_selectors:
+            try:
+                btn = self.page.locator(sel).first
+                if btn.count() > 0 and btn.is_visible():
+                    btn_text = (btn.inner_text() or "").strip().lower()
+                    if "filter" in btn_text or "search" in btn_text or "save" in btn_text:
+                        continue
+                    btn.scroll_into_view_if_needed()
+                    time.sleep(0.3)
+                    btn.click()
+                    try:
+                        self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                    if len(context.pages) > 1 and context.pages[-1] != self.page:
+                        self.page = context.pages[-1]
+                        try:
+                            self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+                        except Exception:
+                            pass
+                        time.sleep(1)
                     if self._is_form_visible():
                         return True
-                except Exception:
-                    continue
-
-        return self._is_form_visible()
+            except Exception:
+                continue
+        return False
 
     def _is_form_visible(self) -> bool:
-        """Checks if input elements or modal dialogs are present on screen."""
-        if self.page.locator(".jobs-easy-apply-modal, div[role='dialog']").count() > 0:
+        """Checks if genuine application input elements or modal dialogs are present on screen."""
+        curr_url = self.page.url.lower()
+
+        # 1. On LinkedIn: ONLY Easy Apply modal or dedicated application dialog counts
+        if "linkedin.com" in curr_url:
+            modal = self.page.locator(".jobs-easy-apply-modal, .jobs-easy-apply-content").first
+            if modal.count() > 0 and modal.is_visible():
+                return True
+            dlg = self.page.locator("div[role='dialog']").first
+            if dlg.count() > 0 and dlg.is_visible():
+                if dlg.locator(".jobs-easy-apply-form-section__grouping, input[type='file'], textarea, input[type='tel']").count() > 0:
+                    return True
+            return False
+
+        # 2. On Indeed: ONLY Indeed Apply container or dialog counts
+        if "indeed.com" in curr_url:
+            ia_cont = self.page.locator("#ia-container, .ia-BasePage").first
+            if ia_cont.count() > 0 and ia_cont.is_visible():
+                return True
+            dlg = self.page.locator("div[role='dialog']").first
+            if dlg.count() > 0 and dlg.is_visible():
+                if dlg.locator("input[type='file'], textarea, input[type='tel']").count() > 0:
+                    return True
+            return False
+
+        # 3. External ATS or company career site:
+        form_cont = self.page.locator(
+            "form#application_form, form#application-form, form[action*='apply'], "
+            "[data-qa='application-form'], [data-automation-id*='form'], #apply-form, .application-form"
+        ).first
+        if form_cont.count() > 0 and form_cont.is_visible():
             return True
-        input_count = self.page.locator("input:not([type='hidden']), textarea, select").count()
-        return input_count >= 2
+
+        if self.page.locator("input[type='file']:visible").count() > 0:
+            return True
+
+        candidate_inputs = self.page.locator(
+            "input:not([type='hidden']):not([type='file']):not([type='submit']):not([type='button']):not([type='search']):not([type='checkbox']):not([type='radio']), textarea, select"
+        )
+        valid_count = 0
+        total_to_check = min(candidate_inputs.count(), 12)
+        for i in range(total_to_check):
+            inp = candidate_inputs.nth(i)
+            if not inp.is_visible():
+                continue
+            name = (inp.get_attribute("name") or "").lower()
+            placeholder = (inp.get_attribute("placeholder") or "").lower()
+            aria_label = (inp.get_attribute("aria-label") or "").lower()
+            inp_id = (inp.get_attribute("id") or "").lower()
+
+            if any(term in name or term in placeholder or term in aria_label or term in inp_id for term in ("search", "keyword", "query", "job-search", "typeahead", "nav")):
+                continue
+            valid_count += 1
+            if valid_count >= 2:
+                return True
+
+        return False
 
     def scan_form_fields(self) -> List[ExtractedField]:
         """Scans the active DOM and accessibility tree for all interactable form fields."""
         fields: List[ExtractedField] = []
         seen_identifiers = set()
+        curr_url = self.page.url.lower()
 
-        # Priority container: LinkedIn Easy Apply modal / dialog, or standard ATS form
-        modal_container = self.page.locator(".jobs-easy-apply-modal, div[role='dialog']").first
-        if modal_container.count() > 0 and modal_container.is_visible():
-            root = modal_container
+        # If on LinkedIn and no Easy Apply modal is present, do NOT scan the LinkedIn page!
+        if "linkedin.com" in curr_url:
+            modal = self.page.locator(".jobs-easy-apply-modal, .jobs-easy-apply-content, div[role='dialog']").first
+            if modal.count() == 0 or not modal.is_visible():
+                return []
+            root = modal
+        elif "indeed.com" in curr_url:
+            modal = self.page.locator("#ia-container, .ia-BasePage, div[role='dialog']").first
+            if modal.count() == 0 or not modal.is_visible():
+                return []
+            root = modal
         else:
-            form_container = self.page.locator("form, #application_form, #application-form, [data-qa='application-form']").first
-            root = form_container if form_container.count() > 0 else self.page
+            # External career portal / ATS
+            modal_container = self.page.locator("div[role='dialog']").first
+            if modal_container.count() > 0 and modal_container.is_visible():
+                root = modal_container
+            else:
+                form_container = self.page.locator("form, #application_form, #application-form, [data-qa='application-form'], [data-automation-id*='form']").first
+                root = form_container if form_container.count() > 0 else self.page
 
         # 1. Process File Inputs (Resume / CV Upload)
         file_locators = root.locator("input[type='file']")
@@ -449,17 +677,30 @@ class FormExtractor:
 
         # 2. Process Standard Inputs (text, email, tel, etc.)
         input_locators = root.locator(
-            "input:not([type='hidden']):not([type='file']):not([type='submit']):not([type='button']):not([type='radio']):not([type='checkbox'])"
+            "input:not([type='hidden']):not([type='file']):not([type='submit']):not([type='button']):not([type='radio']):not([type='checkbox']):not([type='search'])"
         )
         for i in range(input_locators.count()):
             loc = input_locators.nth(i)
             if not loc.is_visible():
                 continue
+            name_raw = loc.get_attribute("name") or ""
+            placeholder_raw = loc.get_attribute("placeholder") or ""
+            name = name_raw.lower()
+            placeholder = placeholder_raw.lower()
+            aria_label = (loc.get_attribute("aria-label") or "").lower()
+            inp_id = (loc.get_attribute("id") or "").lower()
+
+            # Ignore any search boxes, query inputs, or navigation inputs
+            if any(term in name or term in placeholder or term in aria_label or term in inp_id for term in ("search", "keyword", "query", "job-search", "typeahead", "nav")):
+                continue
+
+            label = self._resolve_label(loc, placeholder_raw or name_raw)
+            label_lower = label.lower()
+            if any(term in label_lower for term in ("describe the job you want", "search jobs", "search by title")):
+                continue
+
             input_type = loc.get_attribute("type") or "text"
-            name = loc.get_attribute("name") or ""
-            placeholder = loc.get_attribute("placeholder") or ""
-            label = self._resolve_label(loc, placeholder or name)
-            field_id = f"input_{loc.get_attribute('id') or name or i}"
+            field_id = f"input_{loc.get_attribute('id') or name_raw or i}"
 
             if field_id not in seen_identifiers:
                 seen_identifiers.add(field_id)
@@ -468,8 +709,8 @@ class FormExtractor:
                         id=field_id,
                         label=label,
                         field_type=input_type if input_type in ("email", "tel") else "text",
-                        name=name,
-                        placeholder=placeholder,
+                        name=name_raw,
+                        placeholder=placeholder_raw,
                         required=self._is_field_required(loc, label),
                         selector=f"input:not([type='hidden']):not([type='file']):not([type='submit']):not([type='button']):not([type='radio']):not([type='checkbox']) >> nth={i}",
                     )

@@ -64,7 +64,7 @@
       "desired compensation",
       "target compensation"
     ],
-    "answer": "110,000",
+    "answer": "120,000",
     "field_type": "text",
     "created_at": "2026-09-01T10:00:00Z"
   },
@@ -77,7 +77,7 @@
       "years of relevant experience",
       "total years of software development experience"
     ],
-    "answer": "5",
+    "answer": "3",
     "field_type": "text",
     "created_at": "2026-09-01T10:00:00Z"
   },

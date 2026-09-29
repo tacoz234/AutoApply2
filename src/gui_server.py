@@ -551,9 +551,17 @@ def _run_autofill_worker():
 
             extractor = FormExtractor(page)
             dev_logger.log("INFO", "Detecting and opening application form / Easy Apply...")
-            extractor.ensure_application_form_open()
+            form_opened = extractor.ensure_application_form_open()
+
+            # If page changed (e.g. redirected or opened external site in new tab), update page & session.url:
+            if extractor.page != page:
+                page = extractor.page
+                with session.lock:
+                    session.url = page.url
+                dev_logger.log("SUCCESS", f"Navigated to external application portal: {page.url}")
+
             fields = extractor.scan_form_fields()
-            dev_logger.log("SUCCESS", f"Identified {len(fields)} interactable field(s) on initial view.")
+            dev_logger.log("SUCCESS", f"Identified {len(fields)} interactable field(s) on active view.")
 
             # Define callbacks for GUI synchronization
             def on_field_fill(label: str, status_str: str, val: str):
@@ -757,7 +765,9 @@ def get_profile():
 @app.post("/api/profile")
 def update_profile(profile_data: Dict[str, Any]):
     profile = UserProfile(**profile_data)
+    profile.is_setup_completed = True
     storage.save_profile(profile)
+    dev_logger.log("SUCCESS", f"Candidate profile for '{profile.personal.full_name}' permanently saved to disk.")
     return {"status": "success", "profile": profile.model_dump()}
 
 
@@ -775,14 +785,53 @@ async def upload_resume(file: UploadFile = File(...)):
         dev_logger.log("INFO", f"Uploaded resume '{saved_filename}' ({len(file_bytes)} bytes). Parsing text...")
         parsed_data = resume_parser.parse_resume(saved_path)
 
+        # Auto-persist extracted candidate profile fields so they survive across all sessions
+        profile = storage.load_profile()
+        profile.resume_file = saved_filename
+        profile.is_setup_completed = True
+
+        parsed_pers = parsed_data.get("personal", {})
+        if parsed_pers.get("first_name"):
+            profile.personal.first_name = parsed_pers["first_name"]
+        if parsed_pers.get("last_name"):
+            profile.personal.last_name = parsed_pers["last_name"]
+        if parsed_pers.get("full_name"):
+            profile.personal.full_name = parsed_pers["full_name"]
+        elif profile.personal.first_name and profile.personal.last_name:
+            profile.personal.full_name = f"{profile.personal.first_name} {profile.personal.last_name}"
+        if parsed_pers.get("email"):
+            profile.personal.email = parsed_pers["email"]
+        if parsed_pers.get("phone"):
+            profile.personal.phone = parsed_pers["phone"]
+        if parsed_pers.get("city"):
+            profile.personal.city = parsed_pers["city"]
+        if parsed_pers.get("state"):
+            profile.personal.state = parsed_pers["state"]
+        if parsed_pers.get("postal_code"):
+            profile.personal.postal_code = parsed_pers["postal_code"]
+
+        parsed_links = parsed_data.get("links", {})
+        for k, v in parsed_links.items():
+            if v:
+                profile.links[k] = v
+
+        parsed_skills = parsed_data.get("skills", [])
+        if parsed_skills:
+            existing_skills = set(profile.skills)
+            for s in parsed_skills:
+                if s not in existing_skills:
+                    profile.skills.append(s)
+
+        storage.save_profile(profile)
+
         dev_logger.log(
             "SUCCESS",
-            f"Resume parsed! Extracted candidate '{parsed_data.get('personal', {}).get('full_name', 'Unknown')}' with {len(parsed_data.get('skills', []))} skills.",
+            f"Resume parsed & profile saved! Candidate '{profile.personal.full_name}' with {len(profile.skills)} skills linked to '{saved_filename}'.",
         )
         return {
             "status": "success",
             "filename": saved_filename,
-            "profile": parsed_data,
+            "profile": profile.model_dump(),
         }
     except Exception as e:
         dev_logger.log("ERROR", f"Failed to upload or parse resume: {str(e)}")

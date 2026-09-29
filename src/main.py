@@ -208,6 +208,9 @@ def run_apply_pipeline(url: str):
             # Step 3: Ensure Application Form is Open & Scan Fields
             console.print("\n[bold blue]>> Opening & Inspecting Application Form...[/bold blue]")
             form_ready = extractor.ensure_application_form_open()
+            if extractor.page != page:
+                page = extractor.page
+                console.print(f"[green]>> Navigated to external application portal: {page.url}[/green]")
             if not form_ready:
                 console.print("[yellow]Note: No distinct application form detected. Inspecting current page inputs...[/yellow]")
 

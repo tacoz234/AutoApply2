@@ -85,6 +85,32 @@
           </div>
         </header>
 
+        <!-- Persistent Candidate Profile & Resume Status Bar -->
+        <div class="card active-profile-banner" id="active-profile-banner" style="margin-bottom: 16px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: var(--bg-card); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);">
+          <div class="active-profile-details" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px;">
+            <span class="profile-chip" style="display: inline-flex; align-items: center; gap: 4px;">
+              <span>👤</span>
+              <span style="color: var(--text-secondary); font-weight: 700;">Candidate:</span>
+              <strong id="banner-candidate-name">Cole Determan</strong>
+            </span>
+            <span class="chip-divider" style="color: var(--text-muted);">•</span>
+            <span class="profile-chip" style="display: inline-flex; align-items: center; gap: 4px;">
+              <span>📄</span>
+              <span style="color: var(--text-secondary); font-weight: 700;">Resume:</span>
+              <span class="badge badge-success" id="banner-resume-file" style="font-weight: 800;">9-8-2026-ColeDetermanResume.pdf</span>
+            </span>
+            <span class="chip-divider" style="color: var(--text-muted);">•</span>
+            <span class="profile-chip" style="display: inline-flex; align-items: center; gap: 4px;">
+              <span>⚙️</span>
+              <span style="color: var(--text-secondary); font-weight: 700;">Saved Preferences:</span>
+              <span class="badge badge-info" id="banner-pref-status">Salary &amp; Notice Saved</span>
+            </span>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline" id="btn-banner-edit-profile" style="font-size: 12px; font-weight: 800; padding: 4px 10px;">
+            ✏️ Manage Profile &amp; Resume
+          </button>
+        </div>
+
         <!-- URL Input Card -->
         <div class="card url-card brutal-card-accent">
           <div class="tape-strip tape-top-center"></div>
@@ -728,6 +754,10 @@
           <div class="wizard-step-header" style="margin-bottom: 10px;">
             <h4 style="font-size: 16px; font-weight: 900;">1. Upload Your Master Resume</h4>
             <span class="hand-annotation">✎ Drop your resume PDF here. Local AI will read it and auto-fill your profile ↓</span>
+          </div>
+
+          <div id="wizard-saved-resume-banner" class="alert-box alert-success" style="display: none; margin-bottom: 12px; padding: 10px 14px; font-size: 13px;">
+            <span>💾 <strong>Active Saved Resume:</strong> <span id="wizard-saved-resume-name">None</span> (Loaded from disk). You can upload a new one below, or keep using this one.</span>
           </div>
 
           <div class="resume-dropzone" id="wizard-resume-dropzone">

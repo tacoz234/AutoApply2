@@ -98,6 +98,7 @@ class FormFiller:
         seen_field_ids = set()
 
         for step in range(max_steps):
+            self.page = extractor.page
             fields = extractor.scan_form_fields()
             new_fields = [f for f in fields if f.id not in seen_field_ids]
 
@@ -112,7 +113,7 @@ class FormFiller:
 
             # Look for Next or Review buttons in multi-step wizard
             next_btn = self.page.locator(
-                "button[aria-label*='Continue to next step'], button:has-text('Next'), footer button:has-text('Next'), button[aria-label*='Review your application'], button:has-text('Review')"
+                "button[aria-label*='Continue to next step'], button:has-text('Next'), footer button:has-text('Next'), button[aria-label*='Review your application'], button:has-text('Review'), button:has-text('Save & Continue'), button:has-text('Save and Continue'), button:has-text('Continue'), button:has-text('Next step')"
             ).first
 
             # Strict Safety: Never click submit button automatically

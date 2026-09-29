@@ -1,23 +1,23 @@
 {
   "personal": {
-    "first_name": "ALEX",
-    "last_name": "CHEN",
-    "full_name": "ALEX CHEN",
-    "email": "alex.chen.dev@example.com",
-    "phone": "555-234-5678",
+    "first_name": "Cole",
+    "last_name": "Determan",
+    "full_name": "Cole Determan",
+    "email": "coledeterman@gmail.com",
+    "phone": "(571) 480-2068",
     "address": "",
-    "city": "",
-    "state": "",
+    "city": "Falls Church",
+    "state": "VA",
     "postal_code": "",
     "country": "United States"
   },
   "links": {
-    "linkedin": "",
+    "linkedin": "https://linkedin.com/in/coledeterman",
     "github": "",
-    "portfolio": "https://chen.dev"
+    "portfolio": "coledeterman.com"
   },
   "preferences": {
-    "desired_salary": "150,000",
+    "desired_salary": "120,000",
     "notice_period": "2 weeks"
   },
   "authorization": {
@@ -29,10 +29,23 @@
   "work_experience": [],
   "education": [],
   "skills": [
-    "Distributed Systems",
-    "Python"
+    "Kafka",
+    "Docker",
+    "Python",
+    "Node.js",
+    "SQL",
+    "Css",
+    "Kubernetes",
+    "AWS",
+    "JavaScript",
+    "Swift",
+    "C",
+    "Html",
+    "Redis",
+    "Spring",
+    "Java"
   ],
   "certifications": [],
-  "resume_file": "sample_resume.pdf",
-  "is_setup_completed": false
+  "resume_file": "9-8-2026-ColeDetermanResume.pdf",
+  "is_setup_completed": true
 }

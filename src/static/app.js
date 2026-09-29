@@ -30,6 +30,22 @@ document.addEventListener("DOMContentLoaded", () => {
   initProfileResumeUpload();
   initBrowserAuthManager();
 
+  // Load candidate profile & active resume immediately on startup
+  loadProfile();
+
+  const btnBannerEdit = document.getElementById("btn-banner-edit-profile");
+  if (btnBannerEdit) {
+    btnBannerEdit.addEventListener("click", () => {
+      document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".tab-pane").forEach((p) => p.classList.remove("active"));
+      const profNav = document.querySelector(".nav-item[data-tab='tab-profile']");
+      if (profNav) profNav.classList.add("active");
+      const profTab = document.getElementById("tab-profile");
+      if (profTab) profTab.classList.add("active");
+      loadProfile();
+    });
+  }
+
   // Background poll for log count on startup
   pollDevLogsCount();
   setInterval(pollDevLogsCount, 3000);
@@ -1005,35 +1021,117 @@ function loadProfile() {
     .then((r) => r.json())
     .then((p) => {
       const pers = p.personal || {};
-      document.getElementById("prof-first-name").value = pers.first_name || "";
-      document.getElementById("prof-last-name").value = pers.last_name || "";
-      document.getElementById("prof-full-name").value = pers.full_name || "";
-      document.getElementById("prof-email").value = pers.email || "";
-      document.getElementById("prof-phone").value = pers.phone || "";
-      document.getElementById("prof-address").value = pers.address || "";
-      document.getElementById("prof-city").value = pers.city || "";
-      document.getElementById("prof-state").value = pers.state || "";
-      document.getElementById("prof-postal").value = pers.postal_code || "";
+      const fullName = pers.full_name || `${pers.first_name || ""} ${pers.last_name || ""}`.trim() || "Candidate";
+      const resumeFile = p.resume_file || "sample_resume.pdf";
+
+      // Form inputs on Master Profile
+      const fn = document.getElementById("prof-first-name");
+      if (fn) fn.value = pers.first_name || "";
+      const ln = document.getElementById("prof-last-name");
+      if (ln) ln.value = pers.last_name || "";
+      const full = document.getElementById("prof-full-name");
+      if (full) full.value = pers.full_name || "";
+      const em = document.getElementById("prof-email");
+      if (em) em.value = pers.email || "";
+      const ph = document.getElementById("prof-phone");
+      if (ph) ph.value = pers.phone || "";
+      const ad = document.getElementById("prof-address");
+      if (ad) ad.value = pers.address || "";
+      const ci = document.getElementById("prof-city");
+      if (ci) ci.value = pers.city || "";
+      const st = document.getElementById("prof-state");
+      if (st) st.value = pers.state || "";
+      const po = document.getElementById("prof-postal");
+      if (po) po.value = pers.postal_code || "";
 
       const links = p.links || {};
-      document.getElementById("prof-linkedin").value = links.linkedin || "";
-      document.getElementById("prof-github").value = links.github || "";
-      document.getElementById("prof-portfolio").value = links.portfolio || "";
+      const li = document.getElementById("prof-linkedin");
+      if (li) li.value = links.linkedin || "";
+      const gh = document.getElementById("prof-github");
+      if (gh) gh.value = links.github || "";
+      const pt = document.getElementById("prof-portfolio");
+      if (pt) pt.value = links.portfolio || "";
 
       const auth = p.authorization || {};
-      document.getElementById("prof-auth-us").value = auth.us_work_authorized || "Yes";
-      document.getElementById("prof-auth-sponsorship").value = auth.requires_sponsorship || "No";
-      document.getElementById("prof-auth-clearance").value = auth.security_clearance || "None";
+      const au = document.getElementById("prof-auth-us");
+      if (au) au.value = auth.us_work_authorized || "Yes";
+      const as = document.getElementById("prof-auth-sponsorship");
+      if (as) as.value = auth.requires_sponsorship || "No";
+      const ac = document.getElementById("prof-auth-clearance");
+      if (ac) ac.value = auth.security_clearance || "None";
 
-      document.getElementById("prof-skills").value = (p.skills || []).join(", ");
-      document.getElementById("prof-resume-file").value = p.resume_file || "sample_resume.pdf";
+      const sk = document.getElementById("prof-skills");
+      if (sk) sk.value = (p.skills || []).join(", ");
+      const rf = document.getElementById("prof-resume-file");
+      if (rf) rf.value = resumeFile;
+
       const activeBadge = document.getElementById("active-resume-badge");
-      if (activeBadge) activeBadge.innerText = p.resume_file || "sample_resume.pdf";
+      if (activeBadge) activeBadge.innerText = resumeFile;
 
       const pref = p.preferences || {};
-      document.getElementById("prof-salary").value = pref.desired_salary || "";
-      document.getElementById("prof-notice").value = pref.notice_period || "";
-    });
+      const ps = document.getElementById("prof-salary");
+      if (ps) ps.value = pref.desired_salary || "";
+      const pn = document.getElementById("prof-notice");
+      if (pn) pn.value = pref.notice_period || "";
+
+      // Update Persistent Apply Tab Banner
+      const bannerName = document.getElementById("banner-candidate-name");
+      if (bannerName) bannerName.innerText = fullName;
+      const bannerResume = document.getElementById("banner-resume-file");
+      if (bannerResume) bannerResume.innerText = resumeFile;
+      const bannerPref = document.getElementById("banner-pref-status");
+      if (bannerPref) {
+        if (pref.desired_salary || pref.notice_period) {
+          bannerPref.innerText = `Salary: $${pref.desired_salary || '---'} · Notice: ${pref.notice_period || '---'}`;
+          bannerPref.className = "badge badge-success";
+        } else {
+          bannerPref.innerText = "Configured";
+          bannerPref.className = "badge badge-info";
+        }
+      }
+
+      // Update global wizard resume state
+      wizardUploadedFilename = resumeFile;
+
+      // Update Wizard Step 1 active resume banner if present
+      const wizBanner = document.getElementById("wizard-saved-resume-banner");
+      const wizName = document.getElementById("wizard-saved-resume-name");
+      if (wizBanner && wizName) {
+        if (resumeFile && resumeFile !== "sample_resume.pdf") {
+          wizBanner.style.display = "block";
+          wizName.innerText = resumeFile;
+        } else {
+          wizBanner.style.display = "none";
+        }
+      }
+
+      // Pre-fill Wizard Step 2 with saved candidate profile
+      const wfn = document.getElementById("wiz-first-name");
+      if (wfn && !wfn.value) wfn.value = pers.first_name || "";
+      const wln = document.getElementById("wiz-last-name");
+      if (wln && !wln.value) wln.value = pers.last_name || "";
+      const wfull = document.getElementById("wiz-full-name");
+      if (wfull && !wfull.value) wfull.value = fullName;
+      const wem = document.getElementById("wiz-email");
+      if (wem && !wem.value) wem.value = pers.email || "";
+      const wph = document.getElementById("wiz-phone");
+      if (wph && !wph.value) wph.value = pers.phone || "";
+      const wloc = document.getElementById("wiz-location");
+      if (wloc && !wloc.value) {
+        let locStr = pers.city || "";
+        if (pers.state) locStr += (locStr ? ", " : "") + pers.state;
+        wloc.value = locStr;
+      }
+      const wli = document.getElementById("wiz-linkedin");
+      if (wli && !wli.value) wli.value = links.linkedin || "";
+      const wgh = document.getElementById("wiz-github");
+      if (wgh && !wgh.value) wgh.value = links.github || "";
+      const wpt = document.getElementById("wiz-portfolio");
+      if (wpt && !wpt.value) wpt.value = links.portfolio || "";
+      const wsk = document.getElementById("wiz-skills");
+      if (wsk && !wsk.value) wsk.value = (p.skills || []).join(", ");
+    })
+    .catch((err) => console.warn("Failed to load profile:", err));
 }
 
 // =========================================================================
@@ -1213,6 +1311,9 @@ function initSetupWizard() {
   fetch("/api/setup/status")
     .then((r) => r.json())
     .then((data) => {
+      if (data.resume_file) {
+        wizardUploadedFilename = data.resume_file;
+      }
       if (data.is_setup_completed) {
         if (statusPill) {
           statusPill.innerText = "READY";
@@ -1472,7 +1573,8 @@ function handleWizardResumeUpload(file) {
       stepPill.innerText = "STEP 2: REVIEW & SAVE";
       stepPill.className = "badge badge-success";
 
-      showToast(`Resume '${data.filename}' extracted! Please review fields below.`, "success");
+      loadProfile();
+      showToast(`Resume '${data.filename}' uploaded & profile permanently saved!`, "success");
     })
     .catch((err) => {
       statusEl.style.display = "none";
@@ -1575,7 +1677,8 @@ function initProfileResumeUpload() {
         if (auth.us_work_authorized) document.getElementById("prof-auth-us").value = auth.us_work_authorized;
         if (auth.requires_sponsorship) document.getElementById("prof-auth-sponsorship").value = auth.requires_sponsorship;
 
-        showToast(`Resume '${data.filename}' uploaded and auto-extracted! Click 'Save Profile Changes' to persist.`, "success");
+        loadProfile();
+        showToast(`Resume '${data.filename}' uploaded & candidate profile permanently saved!`, "success");
       })
       .catch((err) => {
         statusEl.style.display = "none";
