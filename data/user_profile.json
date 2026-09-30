@@ -26,24 +26,88 @@
     "security_clearance": "None"
   },
   "eeoc": {},
-  "work_experience": [],
-  "education": [],
+  "work_experience": [
+    {
+      "company": "KBR",
+      "title": "Junior Cloud DevOps Engineer",
+      "location": "Chantilly, VA",
+      "start_date": "August 2026",
+      "end_date": "Present",
+      "description": "Architect and provision scalable AWS cloud infrastructure using Terraform to establish repeatable IaC environments. Build, maintain, and optimize automated GitLab CI/CD pipelines. Support containerization workflows using Docker and Kubernetes."
+    },
+    {
+      "company": "KBR",
+      "title": "Solution Architect Intern",
+      "location": "Chantilly, VA",
+      "start_date": "May 2026",
+      "end_date": "August 2026",
+      "description": "Researched emerging AI applications for enterprise and operational use cases. Supported AI-driven digital transformation and systems engineering initiatives."
+    },
+    {
+      "company": "ManTech",
+      "title": "Technical Support Intern",
+      "location": "Herndon, VA",
+      "start_date": "July 2025",
+      "end_date": "May 2026",
+      "description": "Provided IT support using ServiceNow, Okta Admin, and Asana, assisting 50+ users with account provisioning, access management, and hardware/software troubleshooting."
+    },
+    {
+      "company": "Noblis",
+      "title": "Advanced Technology Engineer Intern",
+      "location": "Reston, VA",
+      "start_date": "May 2024",
+      "end_date": "August 2024",
+      "description": "Integrated REST APIs into AI/Machine Learning applications leveraging Redis, Kafka, and related technologies to improve data flow and reliability."
+    },
+    {
+      "company": "Determan Tech Help",
+      "title": "Owner / Support Specialist",
+      "location": "Falls Church, VA",
+      "start_date": "June 2023",
+      "end_date": "Present",
+      "description": "Assisting 100+ clients with custom PC builds, device setup, and hardware/software troubleshooting. Developed scheduling website using Node.js and Cloudflare."
+    }
+  ],
+  "education": [
+    {
+      "institution": "Virginia Tech University",
+      "degree": "Masters of Engineering in Computer Science & Applications",
+      "field_of_study": "Computer Science - Artificial Intelligence",
+      "location": "Alexandria, VA",
+      "graduation_date": "May 2027"
+    },
+    {
+      "institution": "James Madison University",
+      "degree": "Bachelor of Science in Computer Science",
+      "field_of_study": "Computer Science, Minor in Data Analytics",
+      "location": "Harrisonburg, VA",
+      "gpa": "3.55",
+      "graduation_date": "May 2026"
+    }
+  ],
   "skills": [
-    "Kafka",
-    "Docker",
-    "Python",
-    "Node.js",
-    "SQL",
-    "Css",
-    "Kubernetes",
     "AWS",
+    "Terraform",
+    "Docker",
+    "Kubernetes",
+    "Linux",
+    "Python",
+    "Java",
     "JavaScript",
-    "Swift",
+    "TypeScript",
+    "Node.js",
     "C",
-    "Html",
+    "Swift",
+    "SQL",
+    "Git",
+    "CI/CD",
+    "Kafka",
     "Redis",
-    "Spring",
-    "Java"
+    "HTML",
+    "CSS",
+    "ServiceNow",
+    "Okta",
+    "Agile/Scrum"
   ],
   "certifications": [],
   "resume_file": "9-8-2026-ColeDetermanResume.pdf",

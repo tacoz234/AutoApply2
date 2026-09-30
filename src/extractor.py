@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 from playwright.sync_api import Page, Locator
 from pydantic import BaseModel, Field
 
@@ -430,9 +431,11 @@ class FormExtractor:
             pass
         time.sleep(1)
 
-        # 1. Check if form already exists and has input elements
-        if self._is_form_visible():
-            return True
+        # 1. Check if form already exists and has input elements (poll briefly for SPAs to mount)
+        for _ in range(8):
+            if self._is_form_visible():
+                return True
+            time.sleep(0.5)
 
         # Listen for any new tab/window opened by clicking Apply
         context = self.page.context
@@ -451,6 +454,10 @@ class FormExtractor:
             # 2. Search for and click Apply buttons on the current page
             clicked = self._click_apply_button()
             if not clicked:
+                for _ in range(6):
+                    if self._is_form_visible():
+                        return True
+                    time.sleep(0.5)
                 return self._is_form_visible()
 
             # 3. Handle intermediate redirect modal or confirmation popup (e.g. LinkedIn "Continue to apply")
@@ -507,8 +514,18 @@ class FormExtractor:
 
             # 6. If we landed on external company site (e.g. Amazon, Workday, Greenhouse),
             # check if the application form is visible. If not, click the external site's "Apply Now" button!
+            for _ in range(8):
+                if self._is_form_visible():
+                    return True
+                time.sleep(0.5)
+
             if not self._is_form_visible():
                 self._click_external_site_apply()
+
+            for _ in range(8):
+                if self._is_form_visible():
+                    return True
+                time.sleep(0.5)
 
             return self._is_form_visible()
         finally:
@@ -627,8 +644,14 @@ class FormExtractor:
         """Checks if genuine application input elements or modal dialogs are present on screen."""
         curr_url = self.page.url.lower()
 
+        domain = ""
+        try:
+            domain = urlparse(curr_url).netloc.lower()
+        except Exception:
+            pass
+
         # 1. On LinkedIn: ONLY Easy Apply modal or dedicated application dialog counts
-        if "linkedin.com" in curr_url:
+        if domain.endswith("linkedin.com") or domain == "linkedin.com":
             modal = self.page.locator(".jobs-easy-apply-modal, .jobs-easy-apply-content").first
             if modal.count() > 0 and modal.is_visible():
                 return True
@@ -639,7 +662,7 @@ class FormExtractor:
             return False
 
         # 2. On Indeed: ONLY Indeed Apply container or dialog counts
-        if "indeed.com" in curr_url:
+        if domain.endswith("indeed.com") or domain == "indeed.com":
             ia_cont = self.page.locator("#ia-container, .ia-BasePage").first
             if ia_cont.count() > 0 and ia_cont.is_visible():
                 return True
@@ -661,13 +684,21 @@ class FormExtractor:
             return True
 
         candidate_inputs = self.page.locator(
-            "input:not([type='hidden']):not([type='file']):not([type='submit']):not([type='button']):not([type='search']):not([type='checkbox']):not([type='radio']), textarea, select"
+            "input:not([type='hidden']):not([type='file']):not([type='submit']):not([type='button']):not([type='search']):not([type='checkbox']):not([type='radio']), "
+            "textarea, select, [role='combobox'], .select2-selection"
         )
         valid_count = 0
-        total_to_check = min(candidate_inputs.count(), 12)
+        total_to_check = min(candidate_inputs.count(), 16)
         for i in range(total_to_check):
             inp = candidate_inputs.nth(i)
-            if not inp.is_visible():
+            is_vis = inp.is_visible()
+            if not is_vis:
+                try:
+                    # Hidden select styled by Select2/Chosen is valid if parent is visible
+                    is_vis = (inp.evaluate("el => el.tagName.toLowerCase()") == "select" and inp.locator("xpath=..").is_visible())
+                except Exception:
+                    is_vis = False
+            if not is_vis:
                 continue
             name = (inp.get_attribute("name") or "").lower()
             placeholder = (inp.get_attribute("placeholder") or "").lower()
@@ -688,24 +719,25 @@ class FormExtractor:
         seen_identifiers = set()
         curr_url = self.page.url.lower()
 
+        domain = ""
+        try:
+            domain = urlparse(curr_url).netloc.lower()
+        except Exception:
+            pass
+
         # If on LinkedIn and no Easy Apply modal is present, do NOT scan the LinkedIn page!
-        if "linkedin.com" in curr_url:
+        if domain.endswith("linkedin.com") or domain == "linkedin.com":
             modal = self.page.locator(".jobs-easy-apply-modal, .jobs-easy-apply-content, div[role='dialog']").first
             if modal.count() == 0 or not modal.is_visible():
                 return []
             root = modal
-        elif "indeed.com" in curr_url:
+        elif domain.endswith("indeed.com") or domain == "indeed.com":
             modal = self.page.locator("#ia-container, .ia-BasePage, div[role='dialog']").first
             if modal.count() == 0 or not modal.is_visible():
                 return []
             root = modal
         else:
-            # External career portal / ATS
-            modal_container = self.page.locator("div[role='dialog']").first
-            if modal_container.count() > 0 and modal_container.is_visible() and modal_container.locator("input, select, textarea, button[aria-haspopup='listbox']").count() > 0:
-                root = modal_container
-            else:
-                root = self.page
+            root = self.page
 
         # 1. Process File Inputs (Resume / CV Upload)
         file_locators = root.locator("input[type='file']")
@@ -831,11 +863,14 @@ class FormExtractor:
                     )
                 )
 
-        # 4B. Custom ARIA Dropdowns / Comboboxes (Cloudscape, React Select, Material UI, AWS UI)
+        # 4B. Custom ARIA Dropdowns / Comboboxes (Cloudscape, React Select, Material UI, AWS UI, Select2)
         custom_triggers = root.locator(
             "button[aria-haspopup='listbox'], "
             "div[role='combobox'], "
             "button[role='combobox'], "
+            "span[role='combobox'], "
+            "[role='combobox'], "
+            ".select2-selection, "
             "[data-qa*='select-trigger'], "
             "[data-automation-id*='select'], "
             "button[class*='select-trigger'], "
@@ -851,7 +886,7 @@ class FormExtractor:
 
             # Skip if adjacent or ancestor already has a native select we extracted
             try:
-                if loc.locator("xpath=ancestor::div[1]//select").count() > 0:
+                if loc.locator("xpath=..//select").count() > 0 or loc.locator("xpath=ancestor::div[1]//select").count() > 0:
                     continue
             except Exception:
                 pass
@@ -954,22 +989,53 @@ class FormExtractor:
             if req is not None and req.lower() != "false":
                 return True
             aria_req = locator.get_attribute("aria-required")
+            if not aria_req:
+                try:
+                    parent = locator.locator("xpath=..").first
+                    sibling_cb = parent.locator("[role='combobox'], .select2-selection, [aria-required]").first
+                    if sibling_cb.count() > 0:
+                        aria_req = sibling_cb.get_attribute("aria-required")
+                except Exception:
+                    pass
             if aria_req and aria_req.lower() == "true":
                 return True
-            # Check referenced labels via aria-labelledby
+
+            # Check referenced labels via aria-labelledby (on input or sibling combobox)
             aria_labelledby = locator.get_attribute("aria-labelledby")
+            if not aria_labelledby:
+                try:
+                    parent = locator.locator("xpath=..").first
+                    sibling_cb = parent.locator("[role='combobox'], .select2-selection, [aria-labelledby]").first
+                    if sibling_cb.count() > 0:
+                        aria_labelledby = sibling_cb.get_attribute("aria-labelledby")
+                except Exception:
+                    pass
+
             if aria_labelledby:
                 for ref_id in aria_labelledby.split():
                     ref_id = ref_id.strip()
                     if not ref_id:
                         continue
                     try:
-                        lbl_el = self.page.locator(f"#{ref_id}").first
-                        if lbl_el.count() > 0 and "*" in lbl_el.inner_text():
-                            return True
+                        lbl_el = self.page.locator(f"[id='{ref_id}']").first
+                        if lbl_el.count() > 0:
+                            lbl_text = lbl_el.inner_text()
+                            lbl_class = (lbl_el.get_attribute("class") or "").lower()
+                            lbl_parent = lbl_el.locator("xpath=..").first
+                            parent_text = lbl_parent.inner_text() if lbl_parent.count() > 0 else ""
+                            parent_class = (lbl_parent.get_attribute("class") or "").lower() if lbl_parent.count() > 0 else ""
+                            if (
+                                "*" in lbl_text
+                                or "*" in parent_text
+                                or "required" in lbl_class
+                                or "required" in parent_class
+                                or "required" in parent_text.lower()
+                            ):
+                                return True
                     except Exception:
                         pass
-            # Check outermost question container wrapper for asterisk
+
+            # Check outermost question container wrapper for asterisk or required class
             wrapper = locator.locator(
                 "xpath=ancestor::div["
                 "contains(@class, 'awsui-form-field') or "
@@ -996,15 +1062,25 @@ class FormExtractor:
             if clean_aria and clean_aria.lower() not in ("select an option", "choose an option", "select one", "select...", "-- select --", ""):
                 return clean_aria
 
-        # 2. Check aria-labelledby (handles space-separated list of IDs like in Cloudscape/ARIA)
+        # 2. Check aria-labelledby (on locator or sibling/adjacent combobox like Select2)
         aria_labelledby = locator.get_attribute("aria-labelledby")
+        if not aria_labelledby:
+            try:
+                parent = locator.locator("xpath=..").first
+                sibling_cb = parent.locator("[role='combobox'], .select2-selection, [aria-labelledby]").first
+                if sibling_cb.count() > 0:
+                    aria_labelledby = sibling_cb.get_attribute("aria-labelledby")
+            except Exception:
+                pass
+
         if aria_labelledby:
             for id_part in aria_labelledby.split():
                 id_part = id_part.strip()
                 if not id_part:
                     continue
                 try:
-                    lbl_el = self.page.locator(f"#{id_part}").first
+                    # Use [id='...'] attribute selector to support IDs starting with numbers or GUIDs
+                    lbl_el = self.page.locator(f"[id='{id_part}']").first
                     if lbl_el.count() > 0:
                         text = lbl_el.inner_text().strip()
                         clean_text = re.sub(r"[\s*]+$", "", text).strip()
@@ -1023,14 +1099,17 @@ class FormExtractor:
                 if clean_text:
                     return clean_text
 
-        # 4. Check parent label container
+        # 4. Check parent label container (skip dummy Select2 wrappers like for="dropDownValues" or multi-line option text)
         try:
             parent_label = locator.locator("xpath=ancestor::label").first
             if parent_label.count() > 0:
-                text = parent_label.inner_text().strip()
-                clean_text = re.sub(r"[\s*]+$", "", text).strip()
-                if clean_text:
-                    return clean_text
+                for_attr = parent_label.get_attribute("for") or ""
+                if for_attr != "dropDownValues":
+                    text = parent_label.inner_text().strip()
+                    if text and "\n" not in text and len(text) < 120:
+                        clean_text = re.sub(r"[\s*]+$", "", text).strip()
+                        if clean_text and clean_text.lower() not in ("select an option", "choose an option", "select one", "select...", "-- select --", ""):
+                            return clean_text
         except Exception:
             pass
 
@@ -1050,10 +1129,13 @@ class FormExtractor:
                 "][1]"
             ).first
             if wrapper.count() > 0:
-                lbl = wrapper.locator("label, legend, [class*='label'], [class*='header'], [class*='title'], h2, h3, h4, h5, p").first
+                lbl = wrapper.locator(".question-label label, .question-label, label, legend, [class*='label'], [class*='header'], [class*='title'], h2, h3, h4, h5, p").first
                 if lbl.count() > 0:
                     text = lbl.inner_text().strip()
+                    text = re.sub(r"^Q\.\s*", "", text).strip()
                     clean_text = re.sub(r"[\s*]+$", "", text).strip()
+                    if clean_text.lower().endswith("required"):
+                        clean_text = clean_text[:-8].strip()
                     if clean_text and clean_text.lower() not in ("select an option", "choose an option", "select one", "select...", "-- select --", ""):
                         return clean_text
         except Exception:

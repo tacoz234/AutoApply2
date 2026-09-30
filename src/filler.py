@@ -99,7 +99,15 @@ class FormFiller:
 
         for step in range(max_steps):
             self.page = extractor.page
-            fields = extractor.scan_form_fields()
+
+            # Wait/poll up to 4s if fields haven't mounted yet on SPA wizard transitions
+            fields = []
+            for _ in range(8):
+                fields = extractor.scan_form_fields()
+                if fields:
+                    break
+                time.sleep(0.5)
+
             new_fields = [f for f in fields if f.id not in seen_field_ids]
 
             if new_fields:
@@ -115,6 +123,14 @@ class FormFiller:
                         for f in new_fields:
                             if f.label == d.get("field"):
                                 seen_field_ids.add(f.id)
+            elif not fields:
+                # No fields detected on active view; wizard completed or page finished
+                break
+
+            # If required fields on this view remain unfilled, do not click Next to avoid validation errors
+            unfilled_required = [f for f in fields if f.required and f.id not in seen_field_ids]
+            if unfilled_required and not any(d.get("status") == "FILLED" for d in (step_summary.details if new_fields else [])):
+                break
 
             # Look for Next, Continue, or Review buttons in multi-step wizard
             next_btn = self.page.locator(
@@ -138,7 +154,7 @@ class FormFiller:
                 try:
                     next_btn.click()
                     self.page.wait_for_load_state("domcontentloaded", timeout=4000)
-                    time.sleep(1.2)
+                    time.sleep(1.5)
                 except Exception:
                     break
             else:
@@ -183,12 +199,69 @@ class FormFiller:
                 console.print(f"  [green][+] QA Bank Match:[/green] {field.label} -> [cyan]{qa_val}[/cyan]")
                 return True, qa_val
 
-        # 4. Stage 4: Textarea / Open-Ended Essay Questions
+        # 4. Stage 2.5: Intelligent Inference from Profile & Resume
+        inferred_val = self._infer_answer_from_profile_and_resume(field)
+        if inferred_val:
+            success = self._apply_input_value(field, inferred_val)
+            if success:
+                console.print(f"  [green][+] Inferred Match:[/green] {field.label} -> [cyan]{inferred_val}[/cyan]")
+                self.storage.add_to_qa_bank(
+                    question=field.label,
+                    answer=inferred_val,
+                    field_type=field.field_type,
+                    category="auto_inferred",
+                )
+                summary.questions_added_to_qa += 1
+                return True, inferred_val
+
+        # 5. Stage 4: Textarea / Open-Ended Essay Questions
         if field.field_type == "textarea" and len(field.label) > 15:
             return self._handle_open_ended_textarea(field)
 
-        # 5. Stage 3: Missing Value - Interactive User Prompt & Auto-Persist
+        # 6. Stage 3: Missing Value - Interactive User Prompt & Auto-Persist
         return self._prompt_and_persist(field, summary)
+
+    def _infer_answer_from_profile_and_resume(self, field: ExtractedField) -> Optional[str]:
+        """Infers appropriate answers for qualification, experience, and preference questions based on resume and profile."""
+        norm_q = self.storage.normalize_text(field.label)
+        clean_opts = [o.lower().strip() for o in field.options] if field.options else []
+        is_yes_no = set(clean_opts).issubset({"yes", "no", "true", "false", "y", "n"}) or field.field_type in ("checkbox", "radio")
+
+        # 1. Negative disqualifiers (Sponsorship, felony, criminal, non-compete, etc.)
+        if any(term in norm_q for term in ("require sponsorship", "require visa", "visa sponsorship", "felony", "criminal", "misdemeanor", "convicted", "non compete", "disciplinary")):
+            return "No" if is_yes_no else None
+
+        # 2. Work Authorization / US Citizen / Location / Remote
+        if any(term in norm_q for term in ("legally authorized", "authorized to work", "work in the us", "work in the united states")):
+            return "Yes" if is_yes_no else None
+
+        # 3. Consent / Terms / AI Job Recommendations / Privacy
+        if any(term in norm_q for term in ("consent", "agree", "terms and conditions", "privacy policy", "ai preference", "personalized job recommendations")):
+            return "Yes" if is_yes_no else None
+
+        # 4. Technical Skills & Competencies (Yes / No)
+        if is_yes_no:
+            tech_keywords = [
+                "linux", "python", "java", "javascript", "typescript", "docker", "kubernetes", "aws", "cloud",
+                "terraform", "git", "ci cd", "bash", "shell", "c", "swift", "sql", "kafka", "redis",
+                "servicenow", "okta", "networking", "production environment", "site reliability", "sre",
+                "devops", "systems administration", "troubleshooting", "automation", "bachelor", "degree",
+                "computer science", "monitoring", "infrastructure"
+            ]
+            for kw in tech_keywords:
+                if kw in norm_q:
+                    return "Yes"
+
+            # Qualification inquiries for applicant applying to technical roles
+            if re.match(r"^(do you have|are you|have you|can you|will you be able)", norm_q):
+                return "Yes"
+
+        # 5. Experience Duration / Number of Years Questions
+        if field.options and any(term in norm_q for term in ("years of experience", "total experience", "how many years", "total work", "total building")):
+            # Cole Determan has ~3 years of software/cloud/devops experience
+            return self._find_best_option_match("3 years", field.options)
+
+        return None
 
     def _handle_open_ended_textarea(self, field: ExtractedField) -> Tuple[bool, str]:
         """Synthesizes open-ended essay responses and requests user approval."""
@@ -317,6 +390,28 @@ class FormFiller:
                 return opt
 
         # 2. Boolean match: Yes / No
+        clean_opts = [o.lower().strip() for o in options]
+        if set(clean_opts).issubset({"yes", "no", "true", "false", "y", "n"}):
+            # Check negative values first
+            if target_norm in ("0", "none", "no", "false", "0 years", "no experience", "n"):
+                for opt in options:
+                    if opt.lower().strip() in ("no", "false", "n"):
+                        return opt
+            num_m = re.search(r"(\d+(?:\.\d+)?)", target_norm)
+            if num_m and float(num_m.group(1)) == 0:
+                for opt in options:
+                    if opt.lower().strip() in ("no", "false", "n"):
+                        return opt
+            # Positive numeric or years of experience -> "Yes"
+            if num_m and float(num_m.group(1)) > 0:
+                for opt in options:
+                    if opt.lower().strip() in ("yes", "true", "y"):
+                        return opt
+            if any(term in target_norm for term in ("year", "month", "proficient", "advanced", "intermediate", "expert", "degree", "bachelor", "master")):
+                for opt in options:
+                    if opt.lower().strip() in ("yes", "true", "y"):
+                        return opt
+
         if target_norm in ("yes", "true", "1"):
             for opt in options:
                 if opt.lower().strip() in ("yes", "true", "1", "agree", "i agree"):
@@ -418,12 +513,16 @@ class FormFiller:
             time.sleep(0.35)
 
             options_selector = (
+                ".select2-results__option, "
+                ".select2-results li, "
+                ".select2-dropdown li, "
                 "[role='listbox'] [role='option'], "
                 "[role='listbox'] li, "
                 "[role='option'], "
                 "div.awsui-select-option, "
                 "li.awsui-select-option, "
-                "ul[class*='dropdown'] li"
+                "ul[class*='dropdown'] li, "
+                "div[class*='select-option']"
             )
             popup_options = self.page.locator(options_selector)
             try:
@@ -473,61 +572,153 @@ class FormFiller:
 
             best_match = self._find_best_option_match(target_val, options) or target_val
 
-            # If visible, try native Playwright select_option
+            # Comprehensive JS updater: synchronizes React state, Select2/selectWoo jQuery events, and DOM elements
+            select2_update_js = """(el, val) => {
+                let matched = false;
+                let selectedText = "";
+                let selectedVal = "";
+                for (const opt of el.options) {
+                    if (opt.text.trim().toLowerCase() === val.toLowerCase() || opt.value.trim().toLowerCase() === val.toLowerCase()) {
+                        selectedVal = opt.value;
+                        selectedText = opt.text.trim();
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    for (const opt of el.options) {
+                        if (opt.text.toLowerCase().includes(val.toLowerCase()) || val.toLowerCase().includes(opt.text.toLowerCase())) {
+                            selectedVal = opt.value;
+                            selectedText = opt.text.trim();
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+                if (matched) {
+                    // Update React internal value tracker if present
+                    try {
+                        const tracker = el._valueTracker;
+                        if (tracker) tracker.setValue("");
+                        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value");
+                        if (descriptor && descriptor.set) {
+                            descriptor.set.call(el, selectedVal);
+                        } else {
+                            el.value = selectedVal;
+                        }
+                    } catch(e) {
+                        el.value = selectedVal;
+                    }
+
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+
+                    // Trigger jQuery and Select2 events (including change.select2 and select2:select)
+                    const jq = window.jQuery || window.$;
+                    if (jq) {
+                        try {
+                            jq(el).val(selectedVal);
+                            jq(el).trigger('change.select2');
+                            jq(el).trigger('change');
+                            jq(el).trigger({ type: 'select2:select', params: { data: { id: selectedVal, text: selectedText } } });
+                        } catch(e) {}
+                    }
+
+                    // Synchronize visual Select2 rendered container text and dismiss error styling
+                    try {
+                        const parent = el.parentElement;
+                        const rendered = parent ? parent.querySelector('.select2-selection__rendered') : (el.closest('label, div')?.querySelector('.select2-selection__rendered'));
+                        if (rendered && selectedText) {
+                            rendered.textContent = selectedText;
+                            rendered.title = selectedText;
+                        }
+                        const selection = parent ? parent.querySelector('.select2-selection') : null;
+                        if (selection) {
+                            selection.classList.remove('is-invalid');
+                            selection.setAttribute('aria-invalid', 'false');
+                        }
+                    } catch(e) {}
+                }
+                return matched;
+            }"""
+
+            # Check if native select has an adjacent or wrapping custom combobox trigger (Select2, AWS UI, etc.)
+            sibling_cb = None
+            try:
+                parent = select_loc.locator("xpath=..").first
+                cb = parent.locator("[role='combobox'], .select2-selection, button[aria-haspopup='listbox']").first
+                if cb.count() > 0 and cb.is_visible():
+                    sibling_cb = cb
+                else:
+                    wrapper = select_loc.locator("xpath=ancestor::div[contains(@class, 'drop-down-menu') or contains(@class, 'select') or contains(@class, 'form-group')][1]").first
+                    if wrapper.count() > 0:
+                        cb2 = wrapper.locator("[role='combobox'], .select2-selection, button[aria-haspopup='listbox']").first
+                        if cb2.count() > 0 and cb2.is_visible():
+                            sibling_cb = cb2
+            except Exception:
+                pass
+
+            if sibling_cb is not None:
+                # Try real user click flow through the combobox UI
+                try:
+                    clicked = self._select_custom_combobox(sibling_cb, best_match, options)
+                    if clicked:
+                        try:
+                            select_loc.evaluate(select2_update_js, best_match)
+                        except Exception:
+                            pass
+                        return True
+                except Exception:
+                    pass
+
+            # If visible without custom wrapper, try native Playwright select_option
             if select_loc.is_visible():
                 try:
                     select_loc.select_option(label=best_match, timeout=2000)
                     select_loc.dispatch_event("change")
+                    try:
+                        select_loc.evaluate(select2_update_js, best_match)
+                    except Exception:
+                        pass
                     return True
                 except Exception:
                     try:
                         select_loc.select_option(value=best_match, timeout=2000)
                         select_loc.dispatch_event("change")
+                        try:
+                            select_loc.evaluate(select2_update_js, best_match)
+                        except Exception:
+                            pass
                         return True
                     except Exception:
                         pass
 
-            # For hidden or styled native selects (Select2, Chosen, etc.), set value via JS
+            # Comprehensive JS update as fallback
             try:
-                success = select_loc.evaluate("""(el, val) => {
-                    let matched = false;
-                    for (const opt of el.options) {
-                        if (opt.text.trim().toLowerCase() === val.toLowerCase() || opt.value.trim().toLowerCase() === val.toLowerCase()) {
-                            el.value = opt.value;
-                            matched = true;
-                            break;
-                        }
-                    }
-                    if (!matched) {
-                        for (const opt of el.options) {
-                            if (opt.text.toLowerCase().includes(val.toLowerCase()) || val.toLowerCase().includes(opt.text.toLowerCase())) {
-                                el.value = opt.value;
-                                matched = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (matched) {
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-                    return matched;
-                }""", best_match)
+                success = select_loc.evaluate(select2_update_js, best_match)
                 if success:
                     return True
             except Exception:
                 pass
+
             return False
 
         # 2. Custom Dropdown Trigger (Button / Combobox / Div)
+        return self._select_custom_combobox(select_loc, best_match if 'best_match' in locals() else target_val, options)
+
+    def _select_custom_combobox(self, trigger_loc: Locator, target_val: str, options: List[str]) -> bool:
+        """Clicks custom combobox trigger and selects matching popup item."""
         try:
-            select_loc.scroll_into_view_if_needed()
+            trigger_loc.scroll_into_view_if_needed()
             time.sleep(0.2)
-            select_loc.click()
+            trigger_loc.click()
             time.sleep(0.4)
 
             # Locate visible dropdown popup options
             options_selector = (
+                ".select2-results__option, "
+                ".select2-results li, "
+                ".select2-dropdown li, "
                 "[role='listbox'] [role='option'], "
                 "[role='listbox'] li, "
                 "[role='option'], "
@@ -567,7 +758,7 @@ class FormFiller:
                         return True
 
                 # Fallback: Playwright locator with text match
-                match_el = self.page.locator(f"[role='option']:has-text('{best_match}'), li:has-text('{best_match}')").first
+                match_el = self.page.locator(f".select2-results__option:has-text('{best_match}'), [role='option']:has-text('{best_match}'), li:has-text('{best_match}')").first
                 if match_el.count() > 0 and match_el.is_visible():
                     match_el.scroll_into_view_if_needed()
                     match_el.click()

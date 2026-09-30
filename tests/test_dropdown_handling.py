@@ -263,6 +263,94 @@ class TestDropdownHandling(unittest.TestCase):
 
             browser.close()
 
+    def test_amazon_jobs_select2_combobox_structure(self):
+        """Verifies Amazon Jobs / Select2 comboboxes with GUID IDs and dummy dropDownValues wrapper labels."""
+        amazon_select2_html = """<!DOCTYPE html>
+        <html>
+        <head><title>Amazon Jobs</title></head>
+        <body>
+          <div class="question-label required">
+            <span class="question-prefix d-none" aria-hidden="true">Q. </span>
+            <label id="1c0346ab-4506-4de8-332c-48f814ab85cc-AQ-label" class="text-tooltip-label d-inline mb-0" aria-hidden="true">
+              Which option best describes your total Linux systems administration and/or development experience?
+            </label>
+            <span class="sr-only"> required </span>
+          </div>
+          <div class="drop-down-menu mt-1">
+            <div class="drop-down-menu-select">
+              <label for="dropDownValues" style="width: 100%;">
+                <select tabindex="-1" class="select2-hidden-accessible" aria-hidden="true">
+                  <option value=""></option>
+                  <option value="1">less than 1 year</option>
+                  <option value="2">1 year to less than 2 years</option>
+                  <option value="3">2 years to less than 3 years</option>
+                  <option value="4">3 years to less than 4 years</option>
+                  <option value="5">more than 4 years</option>
+                </select>
+                <span class="select2 select2-container select2-container--bootstrap" dir="ltr" style="width: 100%;">
+                  <span class="selection">
+                    <span class="select2-selection select2-selection--single" aria-haspopup="true" aria-expanded="false" tabindex="0" aria-labelledby="1c0346ab-4506-4de8-332c-48f814ab85cc-AQ-label" role="combobox" aria-invalid="false" aria-required="true">
+                      <span class="select2-selection__rendered" id="select2-0f3w-container" role="textbox" aria-readonly="true">
+                        <span class="select2-selection__placeholder">Select an option</span>
+                      </span>
+                      <span class="select2-selection__arrow" role="presentation"><b role="presentation"></b></span>
+                    </span>
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </body>
+        </html>
+        """
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+
+            page.route("https://example.com/amazon-apply", lambda route: route.fulfill(
+                status=200, content_type="text/html", body=amazon_select2_html
+            ))
+            page.goto("https://example.com/amazon-apply")
+
+            extractor = FormExtractor(page)
+            fields = extractor.scan_form_fields()
+
+            self.assertEqual(len(fields), 1)
+            f = fields[0]
+            self.assertEqual(f.field_type, "select")
+            self.assertEqual(
+                f.label,
+                "Which option best describes your total Linux systems administration and/or development experience?"
+            )
+            self.assertTrue(f.required)
+            self.assertIn("3 years to less than 4 years", f.options)
+
+            storage = StorageManager()
+            scorer = JobScorer()
+            profile = storage.load_profile()
+
+            filler = FormFiller(
+                page=page,
+                storage=storage,
+                scorer=scorer,
+                user_profile=profile,
+            )
+
+            summary = filler.fill_all_fields(fields)
+            self.assertEqual(summary.fields_filled, 1)
+            self.assertEqual(summary.fields_skipped, 0)
+
+            # Underlying select value should be '4' (3 years to less than 4 years)
+            select_val = page.locator("select").evaluate("el => el.value")
+            self.assertEqual(select_val, "4")
+
+            # Visible Select2 UI text should be updated
+            ui_text = page.locator(".select2-selection__rendered").inner_text()
+            self.assertEqual(ui_text, "3 years to less than 4 years")
+
+            browser.close()
+
 
 if __name__ == "__main__":
     unittest.main()
