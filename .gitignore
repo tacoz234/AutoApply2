@@ -37,3 +37,6 @@ data/applications.sqlite
 data/browser_profile/
 data/screenshots/*
 !data/screenshots/.gitkeep
+data/*.html
+data/*.dump
+
