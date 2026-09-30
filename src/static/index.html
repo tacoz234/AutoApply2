@@ -989,14 +989,19 @@
   </div>
 
   <!-- BROWSER LOGIN & SESSIONS MODAL -->
-  <div id="modal-browser-login" class="modal-overlay hidden">
-    <div class="modal-card modal-lg">
-      <div class="modal-header">
-        <div class="modal-title-row">
-          <span class="modal-badge badge-blue">PERSISTENT SESSION</span>
-          <h3 class="modal-title">🔐 Browser Login & Auth Manager</h3>
+  <div id="modal-browser-login" class="modal-overlay hidden" style="display: none;">
+    <div class="modal-box modal-lg" style="max-height: 88vh; overflow-y: auto;">
+      <div class="modal-header" style="justify-content: space-between; align-items: flex-start;">
+        <div style="display: flex; gap: 14px; align-items: center;">
+          <span class="modal-icon">🔐</span>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <span class="badge badge-info" style="font-size: 11px;">PERSISTENT SESSION</span>
+            </div>
+            <h3 style="margin: 0; font-size: 20px; font-weight: 900;">Browser Login & Auth Manager</h3>
+          </div>
         </div>
-        <button id="btn-close-browser-modal" class="modal-close-btn">&times;</button>
+        <button id="btn-close-browser-modal" class="modal-close-btn" title="Close (ESC)">&times;</button>
       </div>
       <div class="modal-body">
         <p class="modal-lead">

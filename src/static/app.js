@@ -1863,6 +1863,33 @@ function initBrowserAuthManager() {
     });
   }
 
+  // Close with Escape key
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (modal && modal.style.display !== "none" && !modal.classList.contains("hidden")) {
+        closeBrowserAuthModal();
+      }
+    }
+  });
+
+  // Ensure modal is closed on page load/refresh
+  closeBrowserAuthModal();
+
+  // First-time visit auto-open (only once ever per browser profile)
+  const hasPrompted = localStorage.getItem("applyflow_auth_first_open_done");
+  if (!hasPrompted) {
+    fetch("/api/setup/status")
+      .then((r) => r.json())
+      .then((data) => {
+        // Only show if setup is already completed so it doesn't collide with setup wizard
+        if (data.is_setup_completed) {
+          localStorage.setItem("applyflow_auth_first_open_done", "true");
+          openBrowserAuthModal();
+        }
+      })
+      .catch(() => {});
+  }
+
   // Load credentials status initially
   loadCredentialsStatus();
 
